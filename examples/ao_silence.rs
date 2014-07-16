@@ -1,0 +1,45 @@
+extern crate ao;
+extern crate audiostream;
+
+use audiostream::{NullSource, Sink};
+use audiostream::ao::AOSink;
+use std::io;
+use std::sync::Arc;
+use std::sync::atomics::{AtomicBool, AcqRel};
+
+#[allow(uppercase_variables)]
+fn main() {
+    let terminate = Arc::new(AtomicBool::new(false));
+    // Will move into the pipeline thread, and we don't need it here
+    // beyond requiring that it be initialized in the main thread.
+    let AO = ao::AO::init();
+
+    {
+        let terminate = terminate.clone();
+
+        spawn(proc() {
+            let sink = AOSink::new(
+                NullSource::<i16>::new(4096),
+                &AO, "", &[]
+            );
+
+            let mut sink = match sink {
+                Err(e) => {
+                    println!("Failed to open output device: {}", e);
+                    return;
+                }
+                Ok(s) => s
+            };
+            println!("Emitting silence. Press ENTER to exit.")
+            sink.run(terminate.deref());
+        })
+    }
+
+    match io::stdin().read_line() {
+        Ok(_) => {
+            terminate.store(true, AcqRel);
+            println!("Terminating.")
+        }
+        Err(e) => println!("I/O error on stdin: {}", e),
+    }
+}

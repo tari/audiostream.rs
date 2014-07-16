@@ -1,0 +1,9 @@
+[package]
+name = "audiostream"
+version = "0.0.1"
+authors = [ "peter@taricorp.net" ]
+
+[dependencies.rust-ao]
+# hg = "https://bitbucket.org/tari/rust-ao"
+git = "https://github.com/tari/rust-ao.git"
+
