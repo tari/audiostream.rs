@@ -1,5 +1,6 @@
 #![experimental]
 #![deny(dead_code,missing_doc)]
+#![feature(macro_rules)]
 
 //! Audio steam pipelines and processing.
 
@@ -11,13 +12,31 @@ use std::sync::atomics::{AtomicBool, AcqRel};
 pub mod ao;
 
 /// Type bound for sample formats.
-pub trait Sample : Num { }
-impl Sample for i8 { }
-impl Sample for i16 { }
+pub trait Sample : Num {
+    /// Minimum value of a valid sample.
+    fn min() -> Self;
+    /// Maximum value of a valid sample.
+    fn max() -> Self;
+}
+
+macro_rules! sample_impl(
+    ($t:ty, $min:expr .. $max:expr) => (
+        impl Sample for $t {
+            fn max() -> $t { $min }
+            fn min() -> $t { $max }
+        }
+    );
+    ($t:ty) => (
+        sample_impl!($t, ::std::num::Bounded::min_value()
+                      .. ::std::num::Bounded::max_value())
+    )
+)
+sample_impl!(i8)
+sample_impl!(i16)
 // Conspicuously missing: i24
-impl Sample for i32 { }
-impl Sample for f32 { }
-impl Sample for f64 { }
+sample_impl!(i32)
+sample_impl!(f32, -1.0 .. 1.0)
+sample_impl!(f64, -1.0 .. 1.0)
 
 /// A source of samples.
 /// 

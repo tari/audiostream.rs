@@ -18,9 +18,16 @@ fn main() {
         let terminate = terminate.clone();
 
         spawn(proc() {
+            let driver = match AO.get_driver("") {
+                None => {
+                    println!("Failed to get default libao driver");
+                    return;
+                }
+                Some(driver) => driver
+            };
             let sink = AOSink::new(
                 NullSource::<i16>::new(4096),
-                &AO, "", &[]
+                &driver
             );
 
             let mut sink = match sink {

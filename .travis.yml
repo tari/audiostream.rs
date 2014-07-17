@@ -1,14 +1,15 @@
 env:
   global:
-    - secure: CKlIR3Vqr59NzhyOb+thHglBBPGEKWhEjNSpwz1zfkAub3W8JUntooASCWg7d+gOJgVw+ovQj+YAKsjtNpcBKKNDCM0Yv/Z67203qZWzkhfdV8UxIiKhirWrJv5Vk/9fv8aCNFDsT39eS6nzOI+p/I83Lk9v4BGUr5W0Zo79EaY=
+    - secure: frOWoC7ggD35BsA959YHaP03tHfEjpujE2t6XxvqYp3QRjXWCxHtBC5BlIHHT3mA/tnpoBCvv/p3NvfMNpTqcRirxr966Nl//dAq7q8Tzt4OyFLdjKkUp3CrgF/bFFjqh0/KkYSThHbxw/I7wTFp7rpJYclEPE5BGwcjkHLipbQ=
 before_install:
   - sudo add-apt-repository --yes ppa:hansjorg/rust
   - sudo add-apt-repository --yes ppa:cmrx64/cargo
   - sudo apt-get update -qq
 install:
-  - sudo apt-get install -qq rust-nightly cargo
+  - sudo apt-get install -qq rust-nightly cargo libao-dev
 script:
   - cargo build
-  - rustdoc src/lib.rs
+  - cargo test
+  - rustdoc -L target/deps/ src/lib.rs
 after_script:
   - curl http://www.rust-ci.org/artifacts/put?t=$RUSTCI_TOKEN | sh
