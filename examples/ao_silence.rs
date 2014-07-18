@@ -1,7 +1,8 @@
 extern crate ao;
 extern crate audiostream;
 
-use audiostream::{NullSource, Sink};
+use audiostream::Sink;
+use audiostream::synth::Null;
 use audiostream::ao::AOSink;
 use std::io;
 use std::sync::Arc;
@@ -26,7 +27,7 @@ fn main() {
                 Some(driver) => driver
             };
             let sink = AOSink::new(
-                NullSource::<i16>::new(4096),
+                Null::<i16>::new(4096),
                 &driver
             );
 
