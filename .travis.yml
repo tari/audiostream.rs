@@ -1,4 +1,4 @@
-langauge: rust
+language: rust
 env:
   global:
     - secure: frOWoC7ggD35BsA959YHaP03tHfEjpujE2t6XxvqYp3QRjXWCxHtBC5BlIHHT3mA/tnpoBCvv/p3NvfMNpTqcRirxr966Nl//dAq7q8Tzt4OyFLdjKkUp3CrgF/bFFjqh0/KkYSThHbxw/I7wTFp7rpJYclEPE5BGwcjkHLipbQ=
