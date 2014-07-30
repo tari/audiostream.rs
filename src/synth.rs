@@ -6,6 +6,8 @@ use std::iter::{Range, Cycle};
 use std::num::Zero;
 use std::rand::Rng;
 use std::rand::distributions::{IndependentSample, Normal};
+#[cfg(test)]
+use test::Bencher;
 
 /// Pure silence.
 pub struct Null<F> {
@@ -32,6 +34,14 @@ impl<F: Sample> Source<F> for Null<F> {
     }
 }
 
+#[bench]
+fn generate_silence(b: &mut Bencher) {
+    let bufsize = 4096;
+    let mut src = Null::<i16>::new(bufsize);
+    b.bytes = ::std::mem::size_of::<i16>() as u64 * bufsize as u64;
+    b.iter(|| src.next());
+}
+
 /// A pure tone.
 /// 
 /// The emitted signal is a full-scale (spans the entire range of the output
@@ -47,7 +57,7 @@ pub struct Tone<F, P> {
     period: uint
 }
 
-impl<F: Sample, P> Tone<F, P> {
+impl<F: Sample, P = f32> Tone<F, P> {
     /// Create a pure tone generator with a specified period in samples for
     /// buffers of `size` samples.
     pub fn new(size: uint, period: uint) -> Tone<F, P> {
@@ -61,7 +71,7 @@ impl<F: Sample, P> Tone<F, P> {
 
 // TODO FloatMath is kinda slow-feeling. Prefer a custom Sinusoid
 // trait that can avoid floats.
-impl<F: Sample, P: Sample+FloatMath = f32> Source<F> for Tone<F, P> {
+impl<F: Sample, P: Sample+FloatMath> Source<F> for Tone<F, P> {
     fn next<'a>(&'a mut self) -> Option<&'a mut [F]> {
         match self.src.next() {
             Some(buf) => {
@@ -76,6 +86,14 @@ impl<F: Sample, P: Sample+FloatMath = f32> Source<F> for Tone<F, P> {
             None => unreachable!()
         }
     }
+}
+
+#[bench]
+fn generate_a440_44100(b: &mut Bencher) {
+    let bufsize = 4096;
+    let mut src = Tone::<i16>::new(bufsize, 100);
+    b.bytes = ::std::mem::size_of::<i16>() as u64 * bufsize as u64;
+    b.iter(|| src.next());
 }
 
 /// Pure Gaussian white noise.
@@ -108,4 +126,13 @@ impl<R: Rng> Source<f64> for WhiteNoise<f64, R> {
             None => unreachable!()
         }
     }
+}
+
+#[bench]
+fn generate_xorshift_noise_44100(b: &mut Bencher) {
+    let bufsize = 4096;
+    let mut src = WhiteNoise::new(bufsize,
+            ::std::rand::XorShiftRng::new_unseeded());
+    b.bytes = ::std::mem::size_of::<f64>() as u64 * bufsize as u64;
+    b.iter(|| src.next());
 }

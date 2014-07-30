@@ -19,6 +19,8 @@
 //! data. However, this convention is not enforced.
 
 extern crate libao = "ao";
+#[cfg(test)]
+extern crate test;
 
 use std::num::Zero;
 use std::sync::atomics::{AtomicBool, AcqRel};
