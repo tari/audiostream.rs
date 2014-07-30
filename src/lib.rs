@@ -1,4 +1,4 @@
-#![crate_id = "audiostream"]
+#![crate_name = "audiostream"]
 #![doc(html_root_url = "http://www.rust-ci.org/tari/audiostream.rs/doc/audiostream/")]
 
 #![experimental]
