@@ -7,3 +7,5 @@ authors = [ "peter@taricorp.net" ]
 # hg = "https://bitbucket.org/tari/rust-ao"
 git = "https://github.com/tari/rust-ao.git"
 
+[dependencies.vorbisfile.rs]
+git = "https://github.com/tari/vorbisfile.rs.git"
