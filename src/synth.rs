@@ -1,6 +1,6 @@
 //! Signal synthesizers.
 
-use super::{Sample, Source, UninitializedSource};
+use super::{Sample, MonoSource, UninitializedSource};
 use std::f64::consts::PI_2;
 use std::iter::{Range, Cycle};
 use std::num::Zero;
@@ -23,7 +23,7 @@ impl<F: Sample> Null<F> {
     }
 }
 
-impl<F: Sample> Source<F> for Null<F> {
+impl<F: Sample> MonoSource<F> for Null<F> {
     fn next<'a>(&'a mut self) -> Option<&'a mut [F]> {
         self.src.next().map(|buf| {
             for x in buf.mut_iter() {
@@ -71,20 +71,20 @@ impl<F: Sample, P = f32> Tone<F, P> {
 
 // TODO FloatMath is kinda slow-feeling. Prefer a custom Sinusoid
 // trait that can avoid floats.
-impl<F: Sample, P: Sample+FloatMath> Source<F> for Tone<F, P> {
+impl<F: Sample, P: Sample+FloatMath> MonoSource<F> for Tone<F, P> {
     fn next<'a>(&'a mut self) -> Option<&'a mut [F]> {
-        match self.src.next() {
-            Some(buf) => {
-                for (x, t) in buf.mut_iter().zip(self.timebase) {
-                    let mut y: P = NumCast::from(t).unwrap();
-                    y = y * NumCast::from(PI_2).unwrap();
-                    y = y / NumCast::from(self.period).unwrap();
-                    *x = Sample::convert::<F>(y.sin());
-                }
-                Some(buf)
-            }
-            None => unreachable!()
+        let buf = match self.src.next() {
+            Some(b) => b,
+            None => return None
+        };
+
+        for (x, t) in buf.mut_iter().zip(self.timebase) {
+            let mut y: P = NumCast::from(t).unwrap();
+            y = y * NumCast::from(PI_2).unwrap();
+            y = y / NumCast::from(self.period).unwrap();
+            *x = Sample::convert::<F>(y.sin());
         }
+        Some(buf)
     }
 }
 
@@ -114,17 +114,17 @@ impl<R: Rng> WhiteNoise<f64, R> {
     }
 }
 
-impl<R: Rng> Source<f64> for WhiteNoise<f64, R> {
+impl<R: Rng> MonoSource<f64> for WhiteNoise<f64, R> {
     fn next<'a>(&'a mut self) -> Option<&'a mut [f64]> {
-        match self.src.next() {
-            Some(buf) => {
-                for x in buf.mut_iter() {
-                    *x = self.normal.ind_sample(&mut self.rng).clip();
-                }
-                Some(buf)
-            }
-            None => unreachable!()
+        let buf = match self.src.next() {
+            Some(b) => b,
+            None => return None
+        };
+
+        for x in buf.mut_iter() {
+            *x = self.normal.ind_sample(&mut self.rng).clip();
         }
+        Some(buf)
     }
 }
 

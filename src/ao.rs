@@ -1,14 +1,17 @@
 //! libao sink
 
 use libao;
-use super::{Source, Sink};
+use std::mem;
+use super::{Sample, Source, Buffer, Sink};
+use super::interleave::Interleave;
 
 /// Sink writing to a libao device.
 ///
 /// Consumes samples of format `F` from a `Source` `R`.
 pub struct AOSink<'a, F, R> {
     device: libao::Device<'a, F>,
-    source: R
+    interleave_buf: Vec<F>,
+    source: R,
 }
 
 impl<'a, F: libao::Sample, R: Source<F>> AOSink<'a, F, R> {
@@ -16,12 +19,7 @@ impl<'a, F: libao::Sample, R: Source<F>> AOSink<'a, F, R> {
     pub fn new<'a>(source: R, driver: &libao::Driver<'a>) -> libao::AoResult<AOSink<'a, F, R>> {
 
         // TODO permit user to specify these parameters
-        let format = libao::SampleFormat {
-            sample_rate: 44100,
-            channels: 1,
-            byte_order: libao::Native,
-            matrix: None
-        };
+        let format = libao::SampleFormat::<F, &str>::new(44100, 1, libao::Native, None);
 
         Ok(AOSink {
             device: match driver.get_info().unwrap().flavor {
@@ -32,20 +30,31 @@ impl<'a, F: libao::Sample, R: Source<F>> AOSink<'a, F, R> {
                     fail!("Can't do file output yet.")
                 }
             },
+            interleave_buf: Vec::new(),
             source: source,
         })
     }
 }
 
-impl<'a, F: libao::Sample, R: Source<F>> Sink for AOSink<'a, F, R> {
+impl<'a, F: libao::Sample + Sample, R: Source<F>> Sink for AOSink<'a, F, R> {
     fn run_once(&mut self) -> Option<()> {
-        let samples = match self.source.next() {
-            None => {
-                return None;
-            },
-            Some(buffer) => buffer,
-        };
-        self.device.play(samples);
-        Some(())
+        match self.source.next() {
+            Buffer(channels) => {
+                // Interleave channels
+                let len = channels[0].len();
+                self.interleave_buf.reserve(len);
+                unsafe {
+                    self.interleave_buf.set_len(len);
+                    // Transmute hack to lose `mut` on each channel.
+                    Interleave::interleave(mem::transmute(channels), self.interleave_buf.as_mut_slice());
+                }
+
+                self.device.play(self.interleave_buf.as_slice());
+                // Drop all interleaved samples
+                self.interleave_buf.truncate(0);
+                Some(())
+            }
+            _ => None
+        }
     }
 }

@@ -5,6 +5,8 @@
 #![deny(dead_code,missing_doc)]
 #![feature(macro_rules)]
 #![feature(default_type_params)]
+#![feature(asm)]
+#![feature(simd)]
 
 //! Audio steam pipelines and processing.
 //! 
@@ -19,20 +21,31 @@
 //! data. However, this convention is not enforced.
 
 extern crate "ao" as libao;
+
+
 #[cfg(test)]
 extern crate test;
 
+use std::mem;
 use std::num::Zero;
+use std::slice::mut_ref_slice;
 use std::sync::atomics::{AtomicBool, AcqRel};
 
+mod interleave;
+
+// #{cfg(libao)]
 pub mod ao;
 pub mod synth;
+// #[cfg(libvorbis)]
+pub mod vorbis;
 
 /// Type bound for sample formats.
 /// 
 /// Implementation assumes `f64` is sufficient to represent all other formats
 /// without loss.
-pub trait Sample : Num + NumCast {
+// Interleave bound is a little wonky, but necessary because we can't have closed typeclasses nor
+// both generic (T: Sample) and specialized (i16) impls for a given trait.
+pub trait Sample : Num + NumCast + interleave::Interleave {
     /// Maximum value of a valid sample.
     fn max() -> Self;
     /// Minimum value of a valid sample.
@@ -85,12 +98,72 @@ sample_impl!(i32)
 sample_impl!(f32, -1.0 .. 1.0)
 sample_impl!(f64, -1.0 .. 1.0)
 
+/// Output from `Source` pull.
+pub enum SourceResult<'a, T:'a> {
+    /// Channel-major buffer of samples.
+    ///
+    /// All channels are guaranteed to have the same number of samples, and there is always at
+    /// least one channel.
+    Buffer(&'a mut [&'a mut [T]]),
+    /// Following samples have the specified rate (in Hz).
+    SampleRate(uint),
+    /// Reached stream end.
+    EndOfStream,
+    /// There was an error in the stream.
+    StreamError(String),
+}
+
 /// A source of samples.
 /// 
 /// Generates buffers of samples of type `T` and passes them to a consumer.
 pub trait Source<T> {
     /// Emit the next buffer.
+    fn next<'a>(&'a mut self) -> SourceResult<'a, T>;
+}
+
+/// A `Source` that only generates one channel at an indeterminate sample rate.
+/// 
+/// To generalize to a full `Source`, use the `adapt` method.
+pub trait MonoSource<T> {
+    /// Get the next set of samples.
     fn next<'a>(&'a mut self) -> Option<&'a mut [T]>;
+
+    /// Adapts a `MonoSource` into a (more general) `Source`.
+    fn adapt(self) -> MonoAdapter<T, Self> {
+        MonoAdapter {
+            src: self,
+            bp: ::std::raw::Slice {
+                data: ::std::ptr::null(),
+                len: 0
+            }
+        }
+    }
+}
+
+/// Generalizes a `MonoSource` into `Source`.
+/// 
+/// To get one, use `MonoSource::adapt`.
+pub struct MonoAdapter<F, T> {
+    src: T,
+    bp: ::std::raw::Slice<F>
+}
+
+impl<F, T: MonoSource<F>> Source<F> for MonoAdapter<F, T> {
+    fn next<'a>(&'a mut self) -> SourceResult<'a, F> {
+        // bp is a bit of a hack, since a function-local can't live long enough to be returned. We
+        // drop the slice into a struct-private field so the pointers remain live, and it remains
+        // safe because the pointer chain is as follows:
+        //     caller -> self.bp -> self.src
+        // 'a bounds self, so the lifetime is valid for both bp and src.
+        self.bp = match self.src.next() {
+            None => return EndOfStream,
+            Some(b) => unsafe { mem::transmute(b) }
+        };
+        
+        Buffer(mut_ref_slice(unsafe {
+            mem::transmute(&mut self.bp)
+        }))
+    }
 }
 
 /// A thing.
@@ -142,7 +215,7 @@ impl<F: Sample> UninitializedSource<F> {
     }
 }
 
-impl<F> Source<F> for UninitializedSource<F> {
+impl<F> MonoSource<F> for UninitializedSource<F> {
     fn next<'a>(&'a mut self) -> Option<&'a mut [F]> {
         Some(self.buffer.as_mut_slice())
     }
