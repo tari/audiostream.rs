@@ -3,9 +3,8 @@ name = "audiostream"
 version = "0.0.1"
 authors = [ "peter@taricorp.net" ]
 
-[dependencies.rust-ao]
-# hg = "https://bitbucket.org/tari/rust-ao"
+[dependencies.ao]
 git = "https://github.com/tari/rust-ao.git"
 
-[dependencies.vorbisfile.rs]
-git = "https://github.com/tari/vorbisfile.rs.git"
+[dependencies.libvorbisfile]
+git = "https://github.com/tari/vorbisfile.rs"

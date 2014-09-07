@@ -18,7 +18,7 @@
 //! buffers are of type `&[Sample]`, presenting a single channel of audio
 //! data. However, this convention is not enforced.
 
-extern crate libao = "ao";
+extern crate "ao" as libao;
 #[cfg(test)]
 extern crate test;
 
