@@ -1,14 +1,14 @@
 extern crate ao;
 extern crate audiostream;
 
-use audiostream::Sink;
+use audiostream::{Sink, MonoSource};
 use audiostream::synth::Null;
 use audiostream::ao::AOSink;
 use std::io;
 use std::sync::Arc;
 use std::sync::atomics::{AtomicBool, AcqRel};
 
-#[allow(uppercase_variables)]
+#[allow(non_snake_case)]
 fn main() {
     let terminate = Arc::new(AtomicBool::new(false));
     // Will move into the pipeline thread, and we don't need it here
@@ -27,7 +27,7 @@ fn main() {
                 Some(driver) => driver
             };
             let sink = AOSink::new(
-                Null::<i16>::new(4096),
+                Null::<i16>::new(4096).adapt(),
                 &driver
             );
 
