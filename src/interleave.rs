@@ -62,10 +62,8 @@ impl Interleave for i16 {
     #[cfg(target_arch = "x86_64")]
     fn interleave(channels: &[&[i16]], out: &mut [i16]) {
         Interleave::validate(channels, out);
-        let features = cpuid();
+        let (_, _, features, _) = cpuid(1);
         let has_avx = features & (1 << 28) != 0;
-        println!("CPU features: {:#x}", features);
-        println!("CPU has AVX: {}", has_avx);
 
         match (has_avx, channels) {
             (true, [left, right]) => {
@@ -100,16 +98,15 @@ unsafe fn i16x2_fast_avx(xs: &[i16], ys: &[i16], zs: &mut [i16]) {
         let right: *const i16x4 = (b as *const i16x4).offset(i as int);
         let mixed: *mut i16x8 = (out as *mut i16x8).offset(i as int);
 
-        // Generated assembly looks alright, but this is segfaulting on the
-        // first vmovdqa. All addresses look right in the debugger.
-        fail!("Inline assembly broken. Figure it out.");
+        // vmovdqa would be better, but requires 256-bit memory alignment.
+        // Same for vmovaps, but that's more reasonable since it's a 256-bit store.
         asm!{
-            "vmovdqa ($0), %xmm0
-             vmovdqa ($1), %xmm1
+            "vmovdqu ($0), %xmm0
+             vmovdqu ($1), %xmm1
              vpunpckhwd %xmm1, %xmm0, %xmm2
              vpunpcklwd %xmm1, %xmm0, %xmm0
              vinsertf128 $$1, %xmm2, %ymm0, %ymm0
-             vmovaps %ymm0, ($2)"
+             vmovups %ymm0, ($2)"
             :                                   // Output
             : "r"(left), "r"(right), "r"(mixed) // Input
             : "%ymm0", "%xmm1", "%xmm2"         // Clobbers
@@ -121,22 +118,19 @@ unsafe fn i16x2_fast_avx(xs: &[i16], ys: &[i16], zs: &mut [i16]) {
                          zs.mut_slice_from(2 * (n & !3)));
 }
 
-// TODO should abstract this out to more general CPU feature detection
-fn cpuid() -> u32 {
-    let mut features: u32;
+// Inline assembly appears to handle this poorly. Easier just to let a C compiler do it.
+#[link(name = "cpuid", kind = "static")]
+extern "C" {
+    fn do_cpuid(query: u32, outputs: *mut u32);
+}
+
+fn cpuid(query: u32) -> (u32, u32, u32, u32) {
+    let mut regs = [0u32, ..4];
     unsafe {
-        // A little suboptimal. LLVM's support for more esoteric constraints appears
-        // to be poor.
-        asm!{
-            "mov $$1, %eax
-             cpuid
-             movl %ecx, $0"
-            : "=r"(features)
-            :
-            : "%eax", "%ebx", "%ecx", "%edx"
-        };
+        do_cpuid(query, regs.as_mut_ptr());
     }
-    features
+
+    (regs[0], regs[1], regs[2], regs[3])
 }
 
 #[cfg(test)]
@@ -151,12 +145,12 @@ mod test {
         for (i, p) in a.mut_iter().enumerate() {
             *p = i as i16;
         }
-        let mut b = a;
+        let b = a;
 
         let mut i = unsafe {
             ::std::mem::uninitialized::<[i16, ..2048]>()
         };
-        Interleave::interleave(&[&mut a, &mut b], &mut i);
+        Interleave::interleave(&[&a, &b], &mut i);
 
         for idx in ::std::iter::range(0, i.len() / 2) {
             assert_eq!(i[idx * 2], idx as i16);

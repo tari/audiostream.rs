@@ -2,6 +2,7 @@
 name = "audiostream"
 version = "0.0.1"
 authors = [ "peter@taricorp.net" ]
+build = "make"
 
 [dependencies.ao]
 git = "https://github.com/tari/rust-ao.git"
