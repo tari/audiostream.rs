@@ -6,7 +6,7 @@ use audiostream::synth::Null;
 use audiostream::ao::AOSink;
 use std::io;
 use std::sync::Arc;
-use std::sync::atomics::{AtomicBool, AcqRel};
+use std::sync::atomics::{AtomicBool, Release};
 
 #[allow(non_snake_case)]
 fn main() {
@@ -45,7 +45,7 @@ fn main() {
 
     match io::stdin().read_line() {
         Ok(_) => {
-            terminate.store(true, AcqRel);
+            terminate.store(true, Release);
             println!("Terminating.")
         }
         Err(e) => println!("I/O error on stdin: {}", e),

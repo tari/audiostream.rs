@@ -32,7 +32,7 @@ extern crate test;
 use std::mem;
 use std::num::Zero;
 use std::slice::mut_ref_slice;
-use std::sync::atomics::{AtomicBool, AcqRel};
+use std::sync::atomics::{AtomicBool, Acquire};
 
 mod cpu;
 mod interleave;
@@ -188,7 +188,7 @@ pub trait Sink {
     /// calling `run_once` until it returns `None`.
     fn run(&mut self, term_cond: &AtomicBool) {
         loop {
-            if term_cond.load(AcqRel) || self.run_once().is_none() {
+            if term_cond.load(Acquire) || self.run_once().is_none() {
                 return;
             }
         }
