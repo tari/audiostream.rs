@@ -3,9 +3,11 @@
 
 #![experimental]
 #![deny(dead_code,missing_doc)]
-#![feature(macro_rules)]
-#![feature(default_type_params)]
+
 #![feature(asm)]
+#![feature(default_type_params)]
+#![feature(macro_rules)]
+#![feature(phase)]
 #![feature(simd)]
 
 //! Audio steam pipelines and processing.
@@ -22,7 +24,8 @@
 
 extern crate "ao" as libao;
 
-
+#[phase(plugin)]
+extern crate lazy_static;
 #[cfg(test)]
 extern crate test;
 
@@ -31,6 +34,7 @@ use std::num::Zero;
 use std::slice::mut_ref_slice;
 use std::sync::atomics::{AtomicBool, AcqRel};
 
+mod cpu;
 mod interleave;
 
 // #{cfg(libao)]

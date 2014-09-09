@@ -9,6 +9,7 @@
 //                                 i32 2, i32 6, i32 3, i32 7>
 
 use std::ptr;
+use super::cpu;
 
 #[simd]
 #[allow(non_camel_case_types)]
@@ -58,15 +59,30 @@ pub trait Interleave : Copy {
 
 }
 
+static FEATURES: [cpu::Feature, ..2] = [
+    cpu::AVX,
+    cpu::Baseline
+];
+fn prioritize_features() -> cpu::Feature {
+    for &feature in FEATURES.iter() {
+        if cpu::cpu_supports(feature) {
+            return feature;
+        }
+    }
+    unreachable!()
+}
+
+lazy_static!(
+    static ref CPU_BEST_FEATURE: cpu::Feature = prioritize_features();
+)
+
 impl Interleave for i16 {
     #[cfg(target_arch = "x86_64")]
     fn interleave(channels: &[&[i16]], out: &mut [i16]) {
         Interleave::validate(channels, out);
-        let (_, _, features, _) = cpuid(1);
-        let has_avx = features & (1 << 28) != 0;
 
-        match (has_avx, channels) {
-            (true, [left, right]) => {
+        match (*CPU_BEST_FEATURE, channels) {
+            (cpu::AVX, [left, right]) => {
                 // No particular alignment restrictions here
                 unsafe {
                     i16x2_fast_avx(left, right, out);
@@ -118,21 +134,6 @@ unsafe fn i16x2_fast_avx(xs: &[i16], ys: &[i16], zs: &mut [i16]) {
                          zs.mut_slice_from(2 * (n & !3)));
 }
 
-// Inline assembly appears to handle this poorly. Easier just to let a C compiler do it.
-#[link(name = "cpuid", kind = "static")]
-extern "C" {
-    fn do_cpuid(query: u32, outputs: *mut u32);
-}
-
-fn cpuid(query: u32) -> (u32, u32, u32, u32) {
-    let mut regs = [0u32, ..4];
-    unsafe {
-        do_cpuid(query, regs.as_mut_ptr());
-    }
-
-    (regs[0], regs[1], regs[2], regs[3])
-}
-
 #[cfg(test)]
 mod test {
     extern crate test;
@@ -160,14 +161,14 @@ mod test {
 
     #[bench]
     fn bench_interleave_2x2(bencher: &mut Bencher) {
-        let mut a = [0i16, ..1024];
+        let mut a = [0i16, ..2048];
         for (i, p) in a.mut_iter().enumerate() {
             *p = i as i16;
         }
         let mut b = a;
 
         let mut i = unsafe {
-            ::std::mem::uninitialized::<[i16, ..2048]>()
+            ::std::mem::uninitialized::<[i16, ..4096]>()
         };
 
         bencher.iter(|| Interleave::interleave(&[&mut a, &mut b], &mut i));
