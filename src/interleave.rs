@@ -11,12 +11,21 @@
 use std::ptr;
 use super::cpu;
 
+/*
 #[simd]
 #[allow(non_camel_case_types)]
+/// 64-bit vector
 struct i16x4(i16, i16, i16, i16);
+*/
 #[simd]
 #[allow(non_camel_case_types)]
+/// 128-bit vector
 struct i16x8(i16, i16, i16, i16, i16, i16, i16, i16);
+#[simd]
+#[allow(non_camel_case_types)]
+/// 256-bit vector
+struct i16x16(i16, i16, i16, i16, i16, i16, i16, i16,
+              i16, i16, i16, i16, i16, i16, i16, i16);
 
 fn interleave_arbitrary<T: Copy>(channels: &[&[T]], out: &mut [T]) {
     let width = channels.len();
@@ -109,10 +118,10 @@ unsafe fn i16x2_fast_avx(xs: &[i16], ys: &[i16], zs: &mut [i16]) {
     let out = zs.as_mut_ptr();
 
     // Take vectors 4 samples at a time from each channel
-    for i in range(0, n / 4) {
-        let left: *const i16x4 = (a as *const i16x4).offset(i as int);
-        let right: *const i16x4 = (b as *const i16x4).offset(i as int);
-        let mixed: *mut i16x8 = (out as *mut i16x8).offset(i as int);
+    for i in range(0, n / 8) {
+        let left: *const i16x8 = (a as *const i16x8).offset(i as int);
+        let right: *const i16x8 = (b as *const i16x8).offset(i as int);
+        let mixed: *mut i16x16 = (out as *mut i16x16).offset(i as int);
 
         // vmovdqa would be better, but requires 256-bit memory alignment.
         // Same for vmovaps, but that's more reasonable since it's a 256-bit store.
@@ -129,9 +138,9 @@ unsafe fn i16x2_fast_avx(xs: &[i16], ys: &[i16], zs: &mut [i16]) {
         };
     }
 
-    // Non-multiple of 4 tail
-    interleave_arbitrary(&[xs.slice_from(n & !3), ys.slice_from(n & !3)],
-                         zs.mut_slice_from(2 * (n & !3)));
+    // Non-multiple of 8 tail
+    interleave_arbitrary(&[xs.slice_from(n & !7), ys.slice_from(n & !7)],
+                         zs.mut_slice_from(2 * (n & !7)));
 }
 
 #[cfg(test)]

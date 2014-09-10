@@ -125,6 +125,12 @@ pub trait Source<T> {
     fn next<'a>(&'a mut self) -> SourceResult<'a, T>;
 }
 
+impl<F> Source<F> for Box<Source<F>+'static> {
+    fn next<'a>(&'a mut self) -> SourceResult<'a, F> {
+        self.next()
+    }
+}
+
 /// A `Source` that only generates one channel at an indeterminate sample rate.
 /// 
 /// To generalize to a full `Source`, use the `adapt` method.

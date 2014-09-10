@@ -1,12 +1,22 @@
 extern crate ao;
 extern crate audiostream;
 
-use audiostream::{Sink, MonoSource};
-use audiostream::synth::Null;
+use audiostream::{Sink, MonoSource, Source};
+use audiostream::synth::{Null, Tone};
 use audiostream::ao::AOSink;
 use std::io;
+use std::os;
 use std::sync::Arc;
 use std::sync::atomics::{AtomicBool, Release};
+
+fn usage() {
+    let args = os::args();
+    let name = match args.as_slice().get(0) {
+        Some(s) => s.as_slice(),
+        None => "wavegen"
+    };
+    println!("Usage: {} [silence | sin]", name);
+}
 
 #[allow(non_snake_case)]
 fn main() {
@@ -15,10 +25,26 @@ fn main() {
     // beyond requiring that it be initialized in the main thread.
     let AO = ao::AO::init();
 
+    let args = os::args();
+    if args.len() != 2 {
+        usage();
+        return;
+    }
+
     {
         let terminate = terminate.clone();
 
         spawn(proc() {
+            // TODO would like DST so we don't need to box 'em.
+            let generator: Box<Source<i16>> = match args[1].as_slice() {
+                "silence" => box Null::<i16>::new(4096).adapt() as Box<Source<i16>>,
+                "sin" => box Tone::<i16>::new(4096, 44100 / 440).adapt() as Box<Source<i16>>,
+                _ => {
+                    usage();
+                    return;
+                }
+            };
+
             let driver = match AO.get_driver("") {
                 None => {
                     println!("Failed to get default libao driver");
@@ -26,8 +52,8 @@ fn main() {
                 }
                 Some(driver) => driver
             };
-            let sink = AOSink::new(
-                Null::<i16>::new(4096).adapt(),
+            let sink = AOSink::<i16, _>::new(
+                generator,
                 &driver
             );
 
