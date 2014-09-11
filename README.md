@@ -20,11 +20,12 @@ If using [cargo] to build your application, the following snippet will add
 
 To build manually, the canonical version of the library exists at
 http://bitbucket.org/tari/audiostream.rs It depends on the [rust-ao] bindings
-to [libao] for audio output.
+to [libao] for audio output and [vorbisfile.rs] for Ogg Vorbis stream input.
 
 [cargo]: http://crates.io/
 [rust-ao]: https://bitbucket.org/tari/rust-ao
 [libao]: https://www.xiph.org/ao/
+[vorbisfile.rs]: https://bitbucket.org/tari/vorbisfile.rs
 
 ## License
 
