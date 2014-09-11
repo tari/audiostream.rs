@@ -8,6 +8,7 @@
 //                      <8 x i32> <i32 0, i32 4, i32 1, i32 5,
 //                                 i32 2, i32 6, i32 3, i32 7>
 
+use std::cmp;
 use std::ptr;
 use super::cpu;
 
@@ -18,11 +19,11 @@ use super::cpu;
 struct i16x4(i16, i16, i16, i16);
 */
 #[simd]
-#[allow(non_camel_case_types)]
+#[allow(non_camel_case_types, dead_code)]
 /// 128-bit vector
 struct i16x8(i16, i16, i16, i16, i16, i16, i16, i16);
 #[simd]
-#[allow(non_camel_case_types)]
+#[allow(non_camel_case_types, dead_code)]
 /// 256-bit vector
 struct i16x16(i16, i16, i16, i16, i16, i16, i16, i16,
               i16, i16, i16, i16, i16, i16, i16, i16);
@@ -68,8 +69,14 @@ pub trait Interleave : Copy {
 
 }
 
+#[cfg(target_arch = "x86_64")]
 static FEATURES: [cpu::Feature, ..2] = [
     cpu::AVX,
+    cpu::Baseline
+];
+#[cfg(target_arch = "arm")]
+static FEATURES: [cpu::Feature, ..2] = [
+    cpu::NEON,
     cpu::Baseline
 ];
 fn prioritize_features() -> cpu::Feature {
@@ -102,6 +109,27 @@ impl Interleave for i16 {
             }
         }
     }
+
+    #[cfg(target_arch = "arm")]
+    fn interleave(channels: &[&[i16]], out: &mut [i16]) {
+        Interleave::validate(channels, out);
+
+        match (*CPU_BEST_FEATURE, channels) {
+            (cpu::NEON, [left, right]) => {
+                // Buffers must have same alignment to even have a chance of
+                // permitting 128-bit loads.
+                // TODO need to look at alignment for `out` too.
+                if (left.as_ptr() as uint) & 7 == (right.as_ptr() as uint) & 7 {
+                    i16x2_fast_neon(left, right, out);
+                } else {
+                    interleave_arbitrary(&[left, right], out);
+                }
+            }
+            (_, channels) => {
+                interleave_arbitrary(channels, out);
+            }
+        }
+    }
 }
 
 impl Interleave for i8 { }
@@ -117,7 +145,7 @@ unsafe fn i16x2_fast_avx(xs: &[i16], ys: &[i16], zs: &mut [i16]) {
     let b = ys.as_ptr();
     let out = zs.as_mut_ptr();
 
-    // Take vectors 4 samples at a time from each channel
+    // Take vectors 8 samples at a time from each channel
     for i in range(0, n / 8) {
         let left: *const i16x8 = (a as *const i16x8).offset(i as int);
         let right: *const i16x8 = (b as *const i16x8).offset(i as int);
@@ -141,6 +169,46 @@ unsafe fn i16x2_fast_avx(xs: &[i16], ys: &[i16], zs: &mut [i16]) {
     // Non-multiple of 8 tail
     interleave_arbitrary(&[xs.slice_from(n & !7), ys.slice_from(n & !7)],
                          zs.mut_slice_from(2 * (n & !7)));
+}
+
+#[cfg(target_arch = "arm")]
+fn i16x2_fast_neon(xs: &[i16], ys: &[i16], zs: &mut [i16]) {
+    let n = xs.len();
+
+    // Three parts: head to get 128-bit alignment, mid where we can do 128-bit loads and stores,
+    // tail for trailing non-multiples of 8.
+    let n_head = cmp::max(xs.as_ptr() as uint & 7, xs.len());
+    let n_tail = (n - n_head) & 7;
+    let n_mid = n - n_head - n_tail;
+
+    if n_head > 0 {
+        interleave_arbitrary(&[xs.slice_to(n_head - 1), ys.slice_to(n_head - 1)],
+                             zs.mut_slice_to(2 * (n_head - 1)));
+    }
+    // Now for the vectorization
+    {
+        unsafe {
+            let mut a = xs.slice(n_head, n - n_tail).as_ptr() as *const i16x8;
+            let mut b = ys.slice(n_head, n - n_tail).as_ptr() as *const i16x8;
+            let mut out = zs.mut_slice(n_head * 2, (n - n_tail) * 2).as_mut_ptr() as *mut i16x8;
+
+            for i in range(0, n_mid / 8) {
+                asm!{
+                    "vldmia $1!, {Q0}
+                     vldm $2!, {Q1}
+                     vzip.16 Q0, Q1
+                     vstm $0!, {Q0, Q1}"
+                    : "+r"(out), "+r"(a), "+r"(b)
+                    : 
+                    : "Q0", "Q1"
+                }
+            }
+        }
+    }
+    if n_tail > 0 {
+        interleave_arbitrary(&[xs.slice_from(n_head + n_mid), ys.slice_from(n_head + n_mid)],
+                             zs.mut_slice_from(2 * (n_head + n_mid)));
+    }
 }
 
 #[cfg(test)]
