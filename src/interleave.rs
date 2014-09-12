@@ -82,6 +82,7 @@ static FEATURES: [cpu::Feature, ..2] = [
 fn prioritize_features() -> cpu::Feature {
     for &feature in FEATURES.iter() {
         if cpu::cpu_supports(feature) {
+            info!("Detected best CPU feature is {}", feature);
             return feature;
         }
     }

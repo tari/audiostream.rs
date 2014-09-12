@@ -24,10 +24,9 @@
 
 extern crate "ao" as libao;
 
-#[phase(plugin)]
-extern crate lazy_static;
-#[cfg(test)]
-extern crate test;
+#[phase(plugin)] extern crate lazy_static;
+#[phase(plugin, link)] extern crate log;
+#[cfg(test)] extern crate test;
 
 use std::mem;
 use std::num::Zero;

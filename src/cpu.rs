@@ -30,6 +30,7 @@ fn parse_env_overrides() -> (Vec<Feature>, Vec<Feature>) {
         let feature: Feature = match FromStr::from_str(name) {
             Some(f) => f,
             None => {
+                error!("Invalid CPU feature: {}", name);
                 continue;
             }
         };
@@ -37,7 +38,8 @@ fn parse_env_overrides() -> (Vec<Feature>, Vec<Feature>) {
         (match feature_spec.char_at(0) {
             '+' => &mut whitelist,
             '-' => &mut blacklist,
-            _ => {
+            c => {
+                error!("CPU feature overrides must begin with '+' or '-', not '{}'", c);
                 continue;
             }
         }).push(feature);
@@ -75,7 +77,7 @@ pub fn cpu_supports(feature: Feature) -> bool {
 mod innards {
     use std::from_str::FromStr;
 
-    #[deriving(PartialEq, Eq)]
+    #[deriving(PartialEq, Eq, Show)]
     pub enum Feature {
         Baseline,
         MMX,
@@ -164,7 +166,7 @@ mod innards {
 mod innards {
     use std::from_str::FromStr;
 
-    #[deriving(PartialEq, Eq)]
+    #[deriving(PartialEq, Eq, Show)]
     pub enum Feature {
         Baseline,
         NEON
