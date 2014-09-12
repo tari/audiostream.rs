@@ -1,4 +1,4 @@
-pub use self::innards::{Feature, cpu_supports};
+pub use self::innards::Feature;
 
 #[cfg(target_arch = "x86_64")]
 pub use self::innards::{Baseline, MMX, SSE, SSE2, SSE3, SSSE3, SSE41,
@@ -6,9 +6,76 @@ pub use self::innards::{Baseline, MMX, SSE, SSE2, SSE3, SSSE3, SSE41,
 #[cfg(target_arch = "arm")]
 pub use self::innards::{Baseline, NEON};
 
+use std::from_str::FromStr;
+use std::os;
+
+lazy_static!{
+    static ref FEATURES_OVERRIDE: (Vec<Feature>, Vec<Feature>) = parse_env_overrides();
+}
+
+fn parse_env_overrides() -> (Vec<Feature>, Vec<Feature>) {
+    let mut blacklist = Vec::<Feature>::new();
+    let mut whitelist = Vec::<Feature>::new();
+
+    let eo = match os::getenv("CPU_FEATURES_OVERRIDE") {
+        None => {
+            return (blacklist, whitelist);
+        }
+        Some(s) => s
+    };
+
+    let plusminus: &[_] = &['+', '-'];
+    for feature_spec in eo.as_slice().split(',') {
+        let name = feature_spec.trim_left_chars(plusminus);
+        let feature: Feature = match FromStr::from_str(name) {
+            Some(f) => f,
+            None => {
+                continue;
+            }
+        };
+
+        (match feature_spec.char_at(0) {
+            '+' => &mut whitelist,
+            '-' => &mut blacklist,
+            _ => {
+                continue;
+            }
+        }).push(feature);
+    }
+
+    (blacklist, whitelist)
+}
+
+/// Returns `true` if the CPU supports `feature`.
+///
+/// ## User overrides
+///
+/// Setting `CPU_FEATURES_OVERRIDE` in the environment allows automatic feature detection to be
+/// overridden in both a positive and negative fashion. The variable should be a comma seperated
+/// list of features, each prefixed with '-' or '+' to disable or enable the feature, respectively.
+///
+/// For example, if the variable's value is "+AVX,-SSE42", AVX will be treated as available and
+/// SSE4.2 will be treated as unavailable, no matter what the actual reported CPU support for these
+/// features is.
+/// 
+/// Invalid feature specifications are ignored.
+pub fn cpu_supports(feature: Feature) -> bool {
+    let (ref blacklist, ref whitelist) = *FEATURES_OVERRIDE;
+
+    if whitelist.iter().any(|f| *f == feature) {
+        true
+    } else if blacklist.iter().any(|f| *f == feature) {
+        false
+    } else {
+        innards::cpu_supports(feature)
+    }
+}
 
 #[cfg(target_arch = "x86_64")]
 mod innards {
+    use std::from_str::FromStr;
+
+    #[deriving(PartialEq, Eq)]
     pub enum Feature {
         Baseline,
         MMX,
@@ -21,6 +88,26 @@ mod innards {
         OSXSAVE,
         AVX,
         AVX2
+    }
+
+    impl FromStr for Feature {
+        fn from_str(s: &str) -> Option<Feature> {
+            Some(match s {
+                "MMX" => MMX,
+                "SSE" => SSE,
+                "SSE2" => SSE2,
+                "SSE3" => SSE3,
+                "SSSE3" => SSSE3,
+                "SSE41" => SSE41,
+                "SSE42" => SSE42,
+                "OSXSAVE" => OSXSAVE,
+                "AVX" => AVX,
+                "AVX2" => AVX2,
+                _ => {
+                    return None;
+                }
+            })
+        }
     }
 
     static EBX: uint = 1;
@@ -75,9 +162,23 @@ mod innards {
 
 #[cfg(target_arch = "arm")]
 mod innards {
+    use std::from_str::FromStr;
+
+    #[deriving(PartialEq, Eq)]
     pub enum Feature {
         Baseline,
         NEON
+    }
+
+    impl FromStr for Feature {
+        fn from_str(s: &str) -> Option<Feature> {
+            Some(match s {
+                "NEON" => NEON,
+                _ => {
+                    return None;
+                }
+            })
+        }
     }
 
     pub fn cpu_supports(feature: Feature) -> bool {
