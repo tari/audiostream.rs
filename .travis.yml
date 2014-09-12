@@ -1,7 +1,7 @@
 language: rust
 env:
   global:
-    - secure: Nk+xbwSukgJduKpUwuhU5rqn1inC6QqcKzNfGDgwV//gaRS9iJe3Aab1cFXkEtkQyOAEu4bXvSuld+Qkd2XGsd4Doep+h/Iz/9YBkFyi5OsW0hGI5XPFpu8hhKfaXcK2cFgrNzo8UU9uRnYLc04fJTOOeVxaCLK8CXe0MeiWz2s=
+    - secure: TVL/JNJPs7CbKNsqnPdRcBfNjXJaXpTXzhHw4zlLPZjyudJjpgRIhzI/toIm6ZRIFKkk0JHVvZBmdLNiMH6kVTWvLttzyKaGjI3gv59jz1QaM6Sf9Ju2tlV7Yv6LCaQVwwRwvj8B8K9Bv/24Sx/Nv794GXt8t3pLALENQk6bKFo=
 install: sudo apt-get install -qq libao-dev libvorbis-dev
 after_script:
   - rustdoc -L target/deps/ src/lib.rs

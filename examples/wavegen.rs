@@ -64,7 +64,7 @@ fn main() {
                 }
                 Ok(s) => s
             };
-            println!("Emitting silence. Press ENTER to exit.")
+            println!("Press ENTER to exit.")
             sink.run(terminate.deref());
         })
     }
