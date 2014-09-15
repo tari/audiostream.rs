@@ -119,7 +119,7 @@ mod innards {
         ($p_eax:expr : $p_ecx:expr, $reg:expr, $bit:expr) => (
             {
                 let mut regs = [0u32, ..4];
-                unsafe { do_cpuid($p_eax, $p_ecx, regs.as_mut_ptr()); }
+                do_cpuid($p_eax, $p_ecx, &mut regs);
 
                 regs[$reg] & (1 << $bit) != 0
             }
@@ -144,7 +144,7 @@ mod innards {
             AVX => {
                 // Requires that OS support for XSAVE be in use and enabled for AVX
                 cpu_supports(OSXSAVE)
-                && (unsafe { do_xgetbv(0) & 6 } == 6)
+                && (do_xgetbv(0) & 6 == 6)
                 && feature!(ECX 28)
             }
             AVX2 => {
@@ -154,11 +154,36 @@ mod innards {
         }
     }
 
-    // Inline assembly appears to handle this poorly. Easier just to let a C compiler do it.
-    #[link(name = "cpuid", kind = "static")]
-    extern "C" {
-        fn do_cpuid(eax: u32, ecx: u32, outputs: *mut u32);
-        fn do_xgetbv(ecx: u32) -> u64;
+    fn do_cpuid(mut eax: u32, mut ecx: u32, regs: &mut [u32]) {
+        let b: u32;
+        let d: u32;
+
+        unsafe {
+            asm!{
+                "cpuid"
+                : "+{eax}"(eax), "={ebx}"(b), "+{ecx}"(ecx), "={edx}"(d)
+            }
+        }
+
+        regs[0] = eax;
+        regs[1] = b;
+        regs[2] = ecx;
+        regs[3] = d;
+    }
+
+    fn do_xgetbv(ecx: u32) -> u64 {
+        let high: u32;
+        let low: u32;
+
+        unsafe {
+            asm!{
+                "xgetbv"
+                : "={edx}"(high), "={eax}"(low)
+                : "{ecx}"(ecx)
+            }
+        }
+
+        (high as u64 << 32) | low as u64
     }
 }
 

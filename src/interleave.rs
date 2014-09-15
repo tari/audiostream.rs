@@ -163,7 +163,7 @@ unsafe fn i16x2_fast_avx(xs: &[i16], ys: &[i16], zs: &mut [i16]) {
              vmovups %ymm0, ($2)"
             :                                   // Output
             : "r"(left), "r"(right), "r"(mixed) // Input
-            : "%ymm0", "%xmm1", "%xmm2"         // Clobbers
+            : "{ymm0}", "{xmm1}", "{xmm2}"      // Clobbers
         };
     }
 
