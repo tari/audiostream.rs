@@ -10,7 +10,7 @@
 
 #[cfg(target_arch = "arm")] use std::cmp;
 use std::ptr;
-use super::cpu;
+#[cfg(target_arch="x86_64")] use super::cpu;
 
 /*
 #[simd]
@@ -74,11 +74,7 @@ static FEATURES: [cpu::Feature, ..2] = [
     cpu::AVX,
     cpu::Baseline
 ];
-#[cfg(target_arch = "arm")]
-static FEATURES: [cpu::Feature, ..2] = [
-    cpu::NEON,
-    cpu::Baseline
-];
+#[cfg(target_arch = "x86_64")]
 fn prioritize_features() -> cpu::Feature {
     for &feature in FEATURES.iter() {
         if cpu::cpu_supports(feature) {
@@ -89,6 +85,7 @@ fn prioritize_features() -> cpu::Feature {
     unreachable!()
 }
 
+#[cfg(target_arch = "x86_64")]
 lazy_static!(
     static ref CPU_BEST_FEATURE: cpu::Feature = prioritize_features();
 )
@@ -112,21 +109,28 @@ impl Interleave for i16 {
     }
 
     #[cfg(target_arch = "arm")]
+    /// ARM doesn't support runtime feature detection because LLVM enforces that we only use
+    /// supported extensions. Build with -C target-feature to select the vector features
+    /// available, and flag it to this code by also defining 'arm_vector' at compile time.
+    ///
+    /// For example, `rustc -C target-feature=+neon --cfg arm_vector=\"neon\"`.
     fn interleave(channels: &[&[i16]], out: &mut [i16]) {
         Interleave::validate(channels, out);
 
-        match (*CPU_BEST_FEATURE, channels) {
-            (cpu::NEON, [left, right]) => {
+        match channels {
+            [left, right] => {
                 // Buffers must have same alignment to even have a chance of
                 // permitting 128-bit loads.
-                // TODO need to look at alignment for `out` too.
-                if (left.as_ptr() as uint) & 7 == (right.as_ptr() as uint) & 7 {
-                    i16x2_fast_neon(left, right, out);
+                let left_align = left.as_ptr() as uint & 7;
+                let right_align = right.as_ptr() as uint & 7;
+                let out_align = out.as_ptr() as uint & 7;
+                if left_align == right_align && right_align == out_align {
+                    i16x2_fast_arm(left, right, out);
                 } else {
                     interleave_arbitrary(&[left, right], out);
                 }
             }
-            (_, channels) => {
+            channels => {
                 interleave_arbitrary(channels, out);
             }
         }
@@ -172,12 +176,14 @@ unsafe fn i16x2_fast_avx(xs: &[i16], ys: &[i16], zs: &mut [i16]) {
                          zs.mut_slice_from(2 * (n & !7)));
 }
 
-#[cfg(target_arch = "arm")]
-fn i16x2_fast_neon(xs: &[i16], ys: &[i16], zs: &mut [i16]) {
+#[cfg(target_arch = "arm", arm_vector = "neon")]
+fn i16x2_fast_arm(xs: &[i16], ys: &[i16], zs: &mut [i16]) {
     let n = xs.len();
 
     // Three parts: head to get 128-bit alignment, mid where we can do 128-bit loads and stores,
     // tail for trailing non-multiples of 8.
+    // TODO VLDM appears to only need 64-bit alignment because Q-register loads are implemented as
+    // a pair of D-register loads. Can relax alignment constraints.
     let n_head = cmp::max(xs.as_ptr() as uint & 7, xs.len());
     let n_tail = (n - n_head) & 7;
     let n_mid = n - n_head - n_tail;
@@ -196,12 +202,12 @@ fn i16x2_fast_neon(xs: &[i16], ys: &[i16], zs: &mut [i16]) {
             for i in range(0, n_mid / 8) {
                 asm!{
                     "vldmia $1!, {Q0}
-                     vldm $2!, {Q1}
+                     vldmia $2!, {Q1}
                      vzip.16 Q0, Q1
                      vstm $0!, {Q0, Q1}"
                     : "+r"(out), "+r"(a), "+r"(b)
                     : 
-                    : "Q0", "Q1"
+                    : "{Q0}", "{Q1}"
                 }
             }
         }
@@ -210,6 +216,11 @@ fn i16x2_fast_neon(xs: &[i16], ys: &[i16], zs: &mut [i16]) {
         interleave_arbitrary(&[xs.slice_from(n_head + n_mid), ys.slice_from(n_head + n_mid)],
                              zs.mut_slice_from(2 * (n_head + n_mid)));
     }
+}
+
+#[cfg(target_arch = "arm", not(arm_vector = "neon"))]
+fn i16x2_fast_arm(xs: &[i16], ys: &[i16], zs: &mut [i16]) {
+    interleave_arbitrary(&[xs, ys], zs)
 }
 
 #[cfg(test)]

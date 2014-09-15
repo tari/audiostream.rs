@@ -33,7 +33,7 @@ use std::num::Zero;
 use std::slice::mut_ref_slice;
 use std::sync::atomics::{AtomicBool, Acquire};
 
-mod cpu;
+#[cfg(target_arch = "x86_64")] mod cpu;
 mod interleave;
 
 // #{cfg(libao)]
