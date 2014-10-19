@@ -26,7 +26,7 @@ impl<F: Sample> Null<F> {
 impl<F: Sample> MonoSource<F> for Null<F> {
     fn next<'a>(&'a mut self) -> Option<&'a mut [F]> {
         self.src.next().map(|buf| {
-            for x in buf.mut_iter() {
+            for x in buf.iter_mut() {
                 *x = Zero::zero();
             }
             buf
@@ -78,7 +78,7 @@ impl<F: Sample, P: Sample+FloatMath> MonoSource<F> for Tone<F, P> {
             None => return None
         };
 
-        for (x, t) in buf.mut_iter().zip(self.timebase) {
+        for (x, t) in buf.iter_mut().zip(self.timebase) {
             let mut y: P = NumCast::from(t).unwrap();
             y = y * NumCast::from(PI_2).unwrap();
             y = y / NumCast::from(self.period).unwrap();
@@ -121,7 +121,7 @@ impl<R: Rng> MonoSource<f64> for WhiteNoise<f64, R> {
             None => return None
         };
 
-        for x in buf.mut_iter() {
+        for x in buf.iter_mut() {
             *x = self.normal.ind_sample(&mut self.rng).clip();
         }
         Some(buf)

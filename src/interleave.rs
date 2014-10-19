@@ -30,7 +30,7 @@ struct i16x16(i16, i16, i16, i16, i16, i16, i16, i16,
 
 fn interleave_arbitrary<T: Copy>(channels: &[&[T]], out: &mut [T]) {
     let width = channels.len();
-    for (i, p) in out.mut_iter().enumerate() {
+    for (i, p) in out.iter_mut().enumerate() {
         unsafe {
             ptr::write(p as *mut _, channels[i % width][i / width]);
         }
@@ -173,10 +173,10 @@ unsafe fn i16x2_fast_avx(xs: &[i16], ys: &[i16], zs: &mut [i16]) {
 
     // Non-multiple of 8 tail
     interleave_arbitrary(&[xs.slice_from(n & !7), ys.slice_from(n & !7)],
-                         zs.mut_slice_from(2 * (n & !7)));
+                         zs.slice_from_mut(2 * (n & !7)));
 }
 
-#[cfg(target_arch = "arm", arm_vector = "neon")]
+#[cfg(all(target_arch = "arm", arm_vector = "neon"))]
 fn i16x2_fast_arm(xs: &[i16], ys: &[i16], zs: &mut [i16]) {
     let n = xs.len();
 
@@ -218,7 +218,7 @@ fn i16x2_fast_arm(xs: &[i16], ys: &[i16], zs: &mut [i16]) {
     }
 }
 
-#[cfg(target_arch = "arm", not(arm_vector = "neon"))]
+#[cfg(all(target_arch = "arm", not(arm_vector = "neon")))]
 fn i16x2_fast_arm(xs: &[i16], ys: &[i16], zs: &mut [i16]) {
     interleave_arbitrary(&[xs, ys], zs)
 }
