@@ -7,7 +7,7 @@ use audiostream::ao::AOSink;
 use std::io;
 use std::os;
 use std::sync::Arc;
-use std::sync::atomics::{AtomicBool, Release};
+use std::sync::atomic::{AtomicBool, Release};
 
 fn usage() {
     let args = os::args();

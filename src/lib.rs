@@ -31,7 +31,7 @@ extern crate "ao" as libao;
 use std::mem;
 use std::num::Zero;
 use std::slice::mut_ref_slice;
-use std::sync::atomics::{AtomicBool, Acquire};
+use std::sync::atomic::{AtomicBool, Acquire};
 
 #[cfg(target_arch = "x86_64")] mod cpu;
 mod interleave;
