@@ -232,7 +232,7 @@ mod test {
     #[test]
     fn test_interleave_2x2x1024() {
         let mut a = [0i16, ..1024];
-        for (i, p) in a.mut_iter().enumerate() {
+        for (i, p) in a.iter_mut().enumerate() {
             *p = i as i16;
         }
         let b = a;
@@ -251,7 +251,7 @@ mod test {
     #[bench]
     fn bench_interleave_2x2(bencher: &mut Bencher) {
         let mut a = [0i16, ..2048];
-        for (i, p) in a.mut_iter().enumerate() {
+        for (i, p) in a.iter_mut().enumerate() {
             *p = i as i16;
         }
         let mut b = a;
