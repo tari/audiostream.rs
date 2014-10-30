@@ -27,7 +27,7 @@ impl<'a, F: libao::Sample, R: Source<F>> AOSink<'a, F, R> {
                     try!(driver.open_live(&format))
                 },
                 libao::File => {
-                    fail!("Can't do file output yet.")
+                    panic!("Can't do file output yet.")
                 }
             },
             interleave_buf: Vec::new(),
