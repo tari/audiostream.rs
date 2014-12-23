@@ -7,9 +7,10 @@
 // #[cfg(libvorbis = "rust")]
 // use rust_vorbis;
 
-extern crate "libvorbisfile" as vorbisfile;
+extern crate vorbisfile;
 
-use super::{Source, SourceResult, Buffer, StreamError, EndOfStream};
+use super::{Source, SourceResult};
+use super::SourceResult::{Buffer, StreamError, EndOfStream};
 use self::vorbisfile::OVResult;
 
 /// Ogg Vorbis decoder.
@@ -34,7 +35,7 @@ impl<R: Reader> Source<f32> for VorbisStream<R> {
         match self.src.decode() {
             Ok(b) => Buffer(b),
             // ??? => SampleRate(...),
-            Err(vorbisfile::EndOfStream) => EndOfStream,
+            Err(vorbisfile::OVError::EndOfStream) => EndOfStream,
             Err(e) => StreamError(format!("vorbisfile decoder: {}", e))
         }
     }

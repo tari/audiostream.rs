@@ -88,7 +88,7 @@ fn prioritize_features() -> cpu::Feature {
 #[cfg(target_arch = "x86_64")]
 lazy_static!(
     static ref CPU_BEST_FEATURE: cpu::Feature = prioritize_features();
-)
+);
 
 impl Interleave for i16 {
     #[cfg(target_arch = "x86_64")]

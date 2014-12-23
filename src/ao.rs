@@ -1,32 +1,33 @@
 //! libao sink
 
-use libao;
+extern crate ao;
+
 use std::mem;
-use super::{Sample, Source, Buffer, Sink};
+use super::{SourceResult, Sample, Source, Sink};
 use super::interleave::Interleave;
 
 /// Sink writing to a libao device.
 ///
 /// Consumes samples of format `F` from a `Source` `R`.
 pub struct AOSink<'a, F, R> {
-    device: libao::Device<'a, F>,
+    device: ao::Device<'a, F>,
     interleave_buf: Vec<F>,
     source: R,
 }
 
-impl<'a, F: libao::Sample, R: Source<F>> AOSink<'a, F, R> {
+impl<'a, F: ao::Sample, R: Source<F>> AOSink<'a, F, R> {
     /// Construct a libao sink.
-    pub fn new<'a>(source: R, driver: &libao::Driver<'a>) -> libao::AoResult<AOSink<'a, F, R>> {
+    pub fn new(source: R, driver: &ao::Driver<'a>) -> ao::AoResult<AOSink<'a, F, R>> {
 
         // TODO permit user to specify these parameters
-        let format = libao::SampleFormat::<F, &str>::new(44100, 1, libao::Native, None);
+        let format = ao::SampleFormat::<F, &str>::new(44100, 1, ao::Endianness::Native, None);
 
         Ok(AOSink {
             device: match driver.get_info().unwrap().flavor {
-                libao::Live => {
+                ao::DriverType::Live => {
                     try!(driver.open_live(&format))
                 },
-                libao::File => {
+                ao::DriverType::File => {
                     panic!("Can't do file output yet.")
                 }
             },
@@ -36,10 +37,10 @@ impl<'a, F: libao::Sample, R: Source<F>> AOSink<'a, F, R> {
     }
 }
 
-impl<'a, F: libao::Sample + Sample, R: Source<F>> Sink for AOSink<'a, F, R> {
+impl<'a, F: ao::Sample + Sample, R: Source<F>> Sink for AOSink<'a, F, R> {
     fn run_once(&mut self) -> Option<()> {
         match self.source.next() {
-            Buffer(channels) => {
+            SourceResult::Buffer(channels) => {
                 // Interleave channels
                 let len = channels[0].len();
                 self.interleave_buf.reserve(len);

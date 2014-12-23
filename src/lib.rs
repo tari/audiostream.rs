@@ -2,10 +2,11 @@
 #![doc(html_root_url = "http://www.rust-ci.org/tari/audiostream.rs/doc/audiostream/")]
 
 #![experimental]
-#![deny(dead_code,missing_doc)]
+#![deny(dead_code,missing_docs)]
 
 #![feature(asm)]
 #![feature(default_type_params)]
+#![feature(globs)]
 #![feature(macro_rules)]
 #![feature(phase)]
 #![feature(simd)]
@@ -22,14 +23,12 @@
 //! buffers are of type `&[Sample]`, presenting a single channel of audio
 //! data. However, this convention is not enforced.
 
-extern crate "ao" as libao;
-
 #[phase(plugin)] extern crate lazy_static;
 #[phase(plugin, link)] extern crate log;
 #[cfg(test)] extern crate test;
 
 use std::mem;
-use std::num::Zero;
+use std::num::NumCast;
 use std::slice::mut_ref_slice;
 use std::sync::atomic::{AtomicBool, Acquire};
 
@@ -48,7 +47,8 @@ pub mod vorbis;
 /// without loss.
 // Interleave bound is a little wonky, but necessary because we can't have closed typeclasses nor
 // both generic (T: Sample) and specialized (i16) impls for a given trait.
-pub trait Sample : Num + NumCast + interleave::Interleave {
+pub trait Sample : Add<Self, Self> + Mul<Self, Self> + Div<Self, Self>
+                 + NumCast + FromPrimitive + interleave::Interleave {
     /// Maximum value of a valid sample.
     fn max() -> Self;
     /// Minimum value of a valid sample.
@@ -91,15 +91,15 @@ macro_rules! sample_impl(
     );
     ($t:ty) => (
         sample_impl!($t, ::std::num::Bounded::min_value()
-                      .. ::std::num::Bounded::max_value())
+                      .. ::std::num::Bounded::max_value());
     )
-)
-sample_impl!(i8)
-sample_impl!(i16)
+);
+sample_impl!(i8);
+sample_impl!(i16);
 // Conspicuously missing: i24
-sample_impl!(i32)
-sample_impl!(f32, -1.0 .. 1.0)
-sample_impl!(f64, -1.0 .. 1.0)
+sample_impl!(i32);
+sample_impl!(f32, -1.0 .. 1.0);
+sample_impl!(f64, -1.0 .. 1.0);
 
 /// Output from `Source` pull.
 pub enum SourceResult<'a, T:'a> {
@@ -165,11 +165,11 @@ impl<F, T: MonoSource<F>> Source<F> for MonoAdapter<F, T> {
         //     caller -> self.bp -> self.src
         // 'a bounds self, so the lifetime is valid for both bp and src.
         self.bp = match self.src.next() {
-            None => return EndOfStream,
+            None => return SourceResult::EndOfStream,
             Some(b) => unsafe { mem::transmute(b) }
         };
         
-        Buffer(mut_ref_slice(unsafe {
+        SourceResult::Buffer(mut_ref_slice(unsafe {
             mem::transmute(&mut self.bp)
         }))
     }
@@ -219,7 +219,7 @@ impl<F: Sample> UninitializedSource<F> {
     /// The yielded buffers will have `size` items.
     pub fn new(size: uint) -> UninitializedSource<F> {
         UninitializedSource {
-            buffer: Vec::from_fn(size, |_| Zero::zero())
+            buffer: Vec::from_fn(size, |_| FromPrimitive::from_uint(0).unwrap())
         }
     }
 }

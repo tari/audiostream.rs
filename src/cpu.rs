@@ -1,12 +1,13 @@
+use std::str::FromStr;
+
 pub use self::innards::Feature;
 
 #[cfg(target_arch = "x86_64")]
-pub use self::innards::{Baseline, MMX, SSE, SSE2, SSE3, SSSE3, SSE41,
-                        SSE42, AVX, AVX2};
+pub use self::innards::Feature::{Baseline, MMX, SSE, SSE2, SSE3, SSSE3, SSE41,
+                                 SSE42, AVX, AVX2};
 #[cfg(target_arch = "arm")]
-pub use self::innards::{Baseline, NEON};
+pub use self::innards::Feature::{Baseline, NEON};
 
-use std::from_str::FromStr;
 use std::os;
 
 lazy_static!{
@@ -75,7 +76,8 @@ pub fn cpu_supports(feature: Feature) -> bool {
 
 #[cfg(target_arch = "x86_64")]
 mod innards {
-    use std::from_str::FromStr;
+    use self::Feature::*;
+    use std::str::FromStr;
 
     #[deriving(PartialEq, Eq, Show)]
     pub enum Feature {
@@ -128,7 +130,7 @@ mod innards {
         ($reg:expr $bit:expr) => (
             feature!(1:0, $reg, $bit)
         )
-    )
+    );
 
     pub fn cpu_supports(feature: Feature) -> bool {
         match feature {
@@ -215,3 +217,5 @@ mod innards {
         }
     }
 }
+
+impl Copy for self::innards::Feature { }

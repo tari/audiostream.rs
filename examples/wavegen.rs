@@ -8,6 +8,7 @@ use std::io;
 use std::os;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Release};
+use std::thread::Thread;
 
 fn usage() {
     let args = os::args();
@@ -34,7 +35,7 @@ fn main() {
     {
         let terminate = terminate.clone();
 
-        spawn(proc() {
+        Thread::spawn(move|| {
             // TODO would like DST so we don't need to box 'em.
             let generator: Box<Source<i16>> = match args[1].as_slice() {
                 "silence" => box Null::<i16>::new(4096).adapt() as Box<Source<i16>>,
@@ -64,9 +65,9 @@ fn main() {
                 }
                 Ok(s) => s
             };
-            println!("Press ENTER to exit.")
+            println!("Press ENTER to exit.");
             sink.run(terminate.deref());
-        })
+        }).detach()
     }
 
     match io::stdin().read_line() {

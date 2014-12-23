@@ -3,7 +3,7 @@
 use super::{Sample, MonoSource, UninitializedSource};
 use std::f64::consts::PI_2;
 use std::iter::{Range, Cycle};
-use std::num::Zero;
+use std::num::{NumCast, FloatMath};
 use std::rand::Rng;
 use std::rand::distributions::{IndependentSample, Normal};
 #[cfg(test)]
@@ -27,7 +27,7 @@ impl<F: Sample> MonoSource<F> for Null<F> {
     fn next<'a>(&'a mut self) -> Option<&'a mut [F]> {
         self.src.next().map(|buf| {
             for x in buf.iter_mut() {
-                *x = Zero::zero();
+                *x = FromPrimitive::from_uint(0).unwrap();
             }
             buf
         })
@@ -39,7 +39,9 @@ fn generate_silence(b: &mut Bencher) {
     let bufsize = 4096;
     let mut src = Null::<i16>::new(bufsize);
     b.bytes = ::std::mem::size_of::<i16>() as u64 * bufsize as u64;
-    b.iter(|| src.next());
+    b.iter(|| {
+        src.next();
+    });
 }
 
 /// A pure tone.
@@ -93,7 +95,9 @@ fn generate_a440_44100(b: &mut Bencher) {
     let bufsize = 4096;
     let mut src = Tone::<i16>::new(bufsize, 100);
     b.bytes = ::std::mem::size_of::<i16>() as u64 * bufsize as u64;
-    b.iter(|| src.next());
+    b.iter(|| {
+        src.next();
+    });
 }
 
 /// Pure Gaussian white noise.
@@ -134,5 +138,8 @@ fn generate_xorshift_noise_44100(b: &mut Bencher) {
     let mut src = WhiteNoise::new(bufsize,
             ::std::rand::XorShiftRng::new_unseeded());
     b.bytes = ::std::mem::size_of::<f64>() as u64 * bufsize as u64;
-    b.iter(|| src.next());
+
+    b.iter(|| {
+        src.next();
+    });
 }
