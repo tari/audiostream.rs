@@ -29,6 +29,8 @@
 
 use std::mem;
 use std::num::NumCast;
+use std::raw;
+use std::raw::Repr;
 use std::slice::mut_ref_slice;
 use std::sync::atomic::{AtomicBool, Acquire};
 
@@ -42,13 +44,13 @@ pub mod synth;
 pub mod vorbis;
 
 /// Type bound for sample formats.
-/// 
+///
 /// Implementation assumes `f64` is sufficient to represent all other formats
 /// without loss.
 // Interleave bound is a little wonky, but necessary because we can't have closed typeclasses nor
 // both generic (T: Sample) and specialized (i16) impls for a given trait.
 pub trait Sample : Add<Self, Self> + Mul<Self, Self> + Div<Self, Self>
-                 + NumCast + FromPrimitive + interleave::Interleave {
+                 + Copy + NumCast + FromPrimitive {
     /// Maximum value of a valid sample.
     fn max() -> Self;
     /// Minimum value of a valid sample.
@@ -57,7 +59,7 @@ pub trait Sample : Add<Self, Self> + Mul<Self, Self> + Div<Self, Self>
     fn clip(&self) -> Self;
 
     /// Convert from `Self` to an arbitrary other sample format.
-    /// 
+    ///
     /// The default intermediate format here is `f64`, capable of losslessly
     /// converting all formats shorter than 52 bits.
     fn convert<X: Sample, I: Sample = f64>(a: Self) -> X {
@@ -116,8 +118,8 @@ pub enum SourceResult<'a, T:'a> {
     StreamError(String),
 }
 
-/// A source of samples.
-/// 
+/// A source of samples with defined sample rate.
+///
 /// Generates buffers of samples of type `T` and passes them to a consumer.
 pub trait Source<T> {
     /// Emit the next buffer.
@@ -131,7 +133,7 @@ impl<F> Source<F> for Box<Source<F>+'static> {
 }
 
 /// A `Source` that only generates one channel at an indeterminate sample rate.
-/// 
+///
 /// To generalize to a full `Source`, use the `adapt` method.
 pub trait MonoSource<T> {
     /// Get the next set of samples.
@@ -141,7 +143,7 @@ pub trait MonoSource<T> {
     fn adapt(self) -> MonoAdapter<T, Self> {
         MonoAdapter {
             src: self,
-            bp: ::std::raw::Slice {
+            bp: raw::Slice {
                 data: ::std::ptr::null(),
                 len: 0
             }
@@ -150,11 +152,9 @@ pub trait MonoSource<T> {
 }
 
 /// Generalizes a `MonoSource` into `Source`.
-/// 
-/// To get one, use `MonoSource::adapt`.
 pub struct MonoAdapter<F, T> {
     src: T,
-    bp: ::std::raw::Slice<F>
+    bp: raw::Slice<F>
 }
 
 impl<F, T: MonoSource<F>> Source<F> for MonoAdapter<F, T> {
@@ -166,12 +166,14 @@ impl<F, T: MonoSource<F>> Source<F> for MonoAdapter<F, T> {
         // 'a bounds self, so the lifetime is valid for both bp and src.
         self.bp = match self.src.next() {
             None => return SourceResult::EndOfStream,
-            Some(b) => unsafe { mem::transmute(b) }
+            Some(b) => b.repr()
         };
         
-        SourceResult::Buffer(mut_ref_slice(unsafe {
-            mem::transmute(&mut self.bp)
-        }))
+        SourceResult::Buffer(unsafe {
+            mem::transmute::<&mut [raw::Slice<F>], &'a mut [&'a mut [F]]>(
+                mut_ref_slice(&mut self.bp)
+            )
+        })
     }
 }
 
@@ -201,11 +203,11 @@ pub trait Sink {
 }
 
 /// A source of uncontrolled samples.
-/// 
+///
 /// Owns buffers that get passed down through a pipeline, providing no
 /// guarantees about what's in the buffer beyond that it's safe to read
 /// and write.
-/// 
+///
 /// This struct is used internally by most synthesis sources, and is
 /// generally not useful to library users. It may be useful, however,
 /// for building custom sources.
@@ -227,5 +229,67 @@ impl<F: Sample> UninitializedSource<F> {
 impl<F> MonoSource<F> for UninitializedSource<F> {
     fn next<'a>(&'a mut self) -> Option<&'a mut [F]> {
         Some(self.buffer.as_mut_slice())
+    }
+}
+
+/// Make a copy of a specified channel.
+///
+/// The source channel may be any index, and the destination may be an existing
+/// channel (in which case the original data is lost) or one more than the highest
+/// valid channel (in which case a new channel is created).
+///
+/// Due to mutability requirements for channel data, this always makes a copy.
+pub struct CopyChannel<F, S> {
+    /// Channel index (from 0) to copy from.
+    from: uint,
+    /// Channel index to copy to.
+    to: uint,
+    source: S,
+    // Contents of `slices` must never outlive the scope in which they are
+    // assigned to maintain safety. Covariant lifetime is used to allow the
+    // concrete lifetime in `next<'a>()` to be stored within the struct.
+    slices: Vec<raw::Slice<F>>,
+    samples: Vec<F>,
+}
+
+impl<F: Sample, S> CopyChannel<F, S> where S: Source<F> {
+    /// Create a new `CopyChannel`.
+    pub fn new(from: uint, to: uint, source: S) -> CopyChannel<F, S> {
+        CopyChannel {
+            from: from,
+            to: to,
+            source: source,
+            slices: Vec::new(),
+            samples: Vec::new()
+        }
+    }
+}
+
+impl<F: Sample, S: Source<F>> Source<F> for CopyChannel<F, S> {
+    fn next<'a>(&'a mut self) -> SourceResult<'a, F> {
+        let b: &'a mut [&'a mut [F]] = match self.source.next() {
+            SourceResult::Buffer(b) => b,
+            x => return x
+        };
+
+        assert!(self.from < b.len(), "CopyChannel source must be a valid channel index");
+        assert!(self.to <= b.len(), "CopyChannel cannot copy from {} to {} with only {} channels",
+                                    self.from, self.to, b.len());
+
+        self.slices.clear();
+        self.slices.extend(b.iter().map(|x: &&mut [F]| (*x).repr()));
+
+        self.samples.clear();
+        self.samples.extend(b[self.from].iter().map(|x| *x));
+        if self.to == b.len() {
+            self.slices.push(unsafe {
+                mem::transmute::<&'a mut [F], raw::Slice<F>>(self.samples.as_mut_slice())
+            });
+        } else {
+            self.slices[self.to] = self.slices[self.from];
+        }
+        SourceResult::Buffer(unsafe {
+            mem::transmute::<&mut [raw::Slice<F>],&'a mut [&'a mut [F]]>(self.slices.as_mut_slice())
+        })
     }
 }

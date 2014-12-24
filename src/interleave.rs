@@ -43,7 +43,7 @@ fn interleave_arbitrary<T: Copy>(channels: &[&[T]], out: &mut [T]) {
 /// `[a0, b0, a1, b1, a2, b2]` and so forth. The native format for the library is interleaved, but
 /// most input and output formats expect an interleaved stream. This trait is used for those
 /// conversions.
-pub trait Interleave : Copy {
+pub trait Interleave : super::Sample {
     /// Interleaves all channels in `input` into output.
     ///
     /// `out`'s contents must not require `drop`ping -- it is expected that the values there on entry

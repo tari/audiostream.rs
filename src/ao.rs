@@ -37,7 +37,7 @@ impl<'a, F: ao::Sample, R: Source<F>> AOSink<'a, F, R> {
     }
 }
 
-impl<'a, F: ao::Sample + Sample, R: Source<F>> Sink for AOSink<'a, F, R> {
+impl<'a, F: ao::Sample + Interleave, R: Source<F>> Sink for AOSink<'a, F, R> {
     fn run_once(&mut self) -> Option<()> {
         match self.source.next() {
             SourceResult::Buffer(channels) => {
