@@ -28,7 +28,7 @@
 #[cfg(test)] extern crate test;
 
 use std::mem;
-use std::num::NumCast;
+use std::num::{NumCast, Float};
 use std::raw;
 use std::raw::Repr;
 use std::slice::mut_ref_slice;
@@ -50,24 +50,54 @@ pub mod vorbis;
 // Interleave bound is a little wonky, but necessary because we can't have closed typeclasses nor
 // both generic (T: Sample) and specialized (i16) impls for a given trait.
 pub trait Sample : Add<Self, Self> + Mul<Self, Self> + Div<Self, Self>
-                 + Copy + NumCast + FromPrimitive {
+                 + Copy + NumCast + FromPrimitive + ::std::fmt::Show {
     /// Maximum value of a valid sample.
     fn max() -> Self;
     /// Minimum value of a valid sample.
     fn min() -> Self;
+    /// True if this type has a hard limit on values in range [min, max].
+    ///
+    /// If false, values outside this range are representable and may be used.
+    fn clips_hard() -> bool;
     /// Clip a value to be in range [min, max] (inclusive).
     fn clip(&self) -> Self;
 
+    /// Get a floating-point representation of a sample.
+    ///
+    /// Full-scale output is in the range -1 to 1. Floating-point inputs may
+    /// yield values outside this range.
+    fn to_float<F: Float + Sample>(x: Self) -> F {
+        let f: F = NumCast::from(x).unwrap();
+        let self_max: Self = Sample::max();
+        let f_max: F = NumCast::from(self_max).unwrap();
+        return f / f_max;
+    }
+
+    /// Convert a floating-point sample to any other format.
+    ///
+    /// Values outside the normal sample range in soft-clipped formats will be
+    /// hard-clipped. In the future this function will not do so when the
+    /// destination formation is also soft-clipped.
+    fn from_float<F: Float + Sample>(x: F) -> Self {
+        // TODO need to check Self::clips_hard() to see if we actually should
+        // clip here.
+        x.clip();
+
+        let self_max: Self = Sample::max();
+        let self_max_f: F = NumCast::from(self_max).unwrap();
+
+        let out: Self = NumCast::from(self_max_f * x).unwrap();
+        out
+    }
+
     /// Convert from `Self` to an arbitrary other sample format.
+    ///
+    /// Does not currently clip values. This should be added.
     ///
     /// The default intermediate format here is `f64`, capable of losslessly
     /// converting all formats shorter than 52 bits.
-    fn convert<X: Sample, I: Sample = f64>(a: Self) -> X {
-        let a_i: I = NumCast::from(a).unwrap();
-        let self_max: Self = Sample::max();
-        let self_max_i: I = NumCast::from(self_max).unwrap();
-        let ratio: I = a_i / self_max_i;
-
+    fn convert<X: Sample, I: Sample + Float = f64>(a: Self) -> X {
+        let ratio: I = Sample::to_float(a);
         let x_max: X = Sample::max();
         let x_max_i: I = NumCast::from(x_max).unwrap();
 
@@ -76,10 +106,11 @@ pub trait Sample : Add<Self, Self> + Mul<Self, Self> + Div<Self, Self>
 }
 
 macro_rules! sample_impl(
-    ($t:ty, $min:expr .. $max:expr) => (
+    ($t:ty, $min:expr .. $max:expr, $hard:expr) => (
         impl Sample for $t {
-            fn max() -> $t { $min }
-            fn min() -> $t { $max }
+            fn max() -> $t { $max }
+            fn min() -> $t { $min }
+            fn clips_hard() -> bool { $hard }
             fn clip(&self) -> $t {
                 if *self < Sample::min() {
                     Sample::min()
@@ -91,10 +122,15 @@ macro_rules! sample_impl(
             }
         }
     );
+    // Implicitly soft-clipped by specified range
+    ($t:ty, $min:expr .. $max:expr) => (
+        sample_impl!($t, $min .. $max, false);
+    );
+    // Implicitly hard-clipped by type's range
     ($t:ty) => (
         sample_impl!($t, ::std::num::Bounded::min_value()
-                      .. ::std::num::Bounded::max_value());
-    )
+                      .. ::std::num::Bounded::max_value(), true);
+    );
 );
 sample_impl!(i8);
 sample_impl!(i16);
@@ -103,7 +139,19 @@ sample_impl!(i32);
 sample_impl!(f32, -1.0 .. 1.0);
 sample_impl!(f64, -1.0 .. 1.0);
 
+#[test]
+fn test_to_float() {
+    assert_eq!(64f32 / 32767f32, Sample::to_float(64i16));
+}
+
+#[test]
+fn test_from_float() {
+    let x: f32 = 64.0 / 32767.0;
+    assert_eq!(64i16, Sample::from_float(x));
+}
+
 /// Output from `Source` pull.
+#[deriving(Show, PartialEq)]
 pub enum SourceResult<'a, T:'a> {
     /// Channel-major buffer of samples.
     ///
@@ -126,9 +174,9 @@ pub trait Source<T> {
     fn next<'a>(&'a mut self) -> SourceResult<'a, T>;
 }
 
-impl<F> Source<F> for Box<Source<F>+'static> {
+impl<'z, F> Source<F> for Box<Source<F> + 'z> {
     fn next<'a>(&'a mut self) -> SourceResult<'a, F> {
-        self.next()
+        self.deref_mut().next()
     }
 }
 
@@ -291,5 +339,84 @@ impl<F: Sample, S: Source<F>> Source<F> for CopyChannel<F, S> {
         SourceResult::Buffer(unsafe {
             mem::transmute::<&mut [raw::Slice<F>],&'a mut [&'a mut [F]]>(self.slices.as_mut_slice())
         })
+    }
+}
+
+/// Adjust the amplitude of the input stream by a constant factor.
+///
+/// A factor greater than one increases amplitude, less than one reduced
+/// amplitude.
+#[allow(dead_code)]
+pub struct Amplify<F, S, P> {
+    factor: P,
+    source: S
+}
+
+impl<F, S, P> Amplify<F, S, P> {
+    /// Create a new amplifier (or attenuator).
+    pub fn new(source: S, factor: P) -> Amplify<F, S, P> {
+        Amplify {
+            factor: factor,
+            source: source
+        }
+    }
+}
+
+impl<F: Sample, S: Source<F>, P: Float + Sample> Source<F> for Amplify<F, S, P> {
+    fn next<'a>(&'a mut self) -> SourceResult<'a, F> {
+        let buf = match self.source.next() {
+            SourceResult::Buffer(b) => b,
+            x => return x
+        };
+
+        // TODO must handle clipping somehow
+        for channel in buf.iter_mut() {
+            for sample in channel.iter_mut() {
+                let samp_f: P = Sample::to_float::<P>(*sample);
+                *sample = Sample::from_float(samp_f * self.factor);
+            }
+        }
+        SourceResult::Buffer(buf)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Sample, Source, SourceResult, MonoSource, Amplify};
+
+    struct ConstantSource<F> {
+        data: Vec<F>,
+        sbuf: Vec<F>
+    }
+
+    impl<F: Sample + Clone> MonoSource<F> for ConstantSource<F> {
+        fn next<'a>(&'a mut self) -> Option<&'a mut [F]> {
+            self.sbuf = self.data.clone();
+            Some(self.sbuf.as_mut_slice())
+        }
+    }
+
+    impl<F> ::std::default::Default for ConstantSource<F> {
+        fn default() -> ConstantSource<F> {
+            ConstantSource {
+                data: vec![],
+                sbuf: vec![]
+            }
+        }
+    }
+
+    #[test]
+    fn test_amplify() {
+        let mut src = Amplify::<_, _, f32>::new(ConstantSource::<i16> {
+                data: vec![0, 64, 128, 64, 0, -64, -128, -64, 0],
+                sbuf: vec![]
+            }.adapt(),
+            1.0
+        );
+
+        assert_eq!(src.next(),
+                   SourceResult::Buffer(
+                       &mut [&mut [0i16, 64, 128, 64, 0, -64, -128, -64, 0]]
+                   ));
     }
 }

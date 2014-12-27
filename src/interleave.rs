@@ -193,25 +193,24 @@ fn i16x2_fast_arm(xs: &[i16], ys: &[i16], zs: &mut [i16]) {
                              zs.mut_slice_to(2 * (n_head - 1)));
     }
     // Now for the vectorization
-    {
-        unsafe {
-            let mut a = xs.slice(n_head, n - n_tail).as_ptr() as *const i16x8;
-            let mut b = ys.slice(n_head, n - n_tail).as_ptr() as *const i16x8;
-            let mut out = zs.mut_slice(n_head * 2, (n - n_tail) * 2).as_mut_ptr() as *mut i16x8;
+    unsafe {
+        let mut a = xs.slice(n_head, n - n_tail).as_ptr() as *const i16x8;
+        let mut b = ys.slice(n_head, n - n_tail).as_ptr() as *const i16x8;
+        let mut out = zs.mut_slice(n_head * 2, (n - n_tail) * 2).as_mut_ptr() as *mut i16x8;
 
-            for i in range(0, n_mid / 8) {
-                asm!{
-                    "vldmia $1!, {Q0}
-                     vldmia $2!, {Q1}
-                     vzip.16 Q0, Q1
-                     vstm $0!, {Q0, Q1}"
-                    : "+r"(out), "+r"(a), "+r"(b)
-                    : 
-                    : "{Q0}", "{Q1}"
-                }
+        for i in range(0, n_mid / 8) {
+            asm!{
+                "vldmia $1!, {Q0}
+                 vldmia $2!, {Q1}
+                 vzip.16 Q0, Q1
+                 vstm $0!, {Q0, Q1}"
+                : "+r"(out), "+r"(a), "+r"(b)
+                : 
+                : "{Q0}", "{Q1}"
             }
         }
     }
+
     if n_tail > 0 {
         interleave_arbitrary(&[xs.slice_from(n_head + n_mid), ys.slice_from(n_head + n_mid)],
                              zs.mut_slice_from(2 * (n_head + n_mid)));

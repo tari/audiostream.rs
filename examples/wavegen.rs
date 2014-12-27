@@ -1,60 +1,65 @@
+#![feature(phase)]
+
 extern crate ao;
 extern crate audiostream;
+extern crate docopt;
+#[phase(plugin)] extern crate docopt_macros;
+extern crate "rustc-serialize" as rustc_serialize;
 
-use audiostream::{Sink, MonoSource, Source};
+use audiostream::{Sink, MonoSource, Source, Amplify};
 use audiostream::synth::{Null, Tone};
 use audiostream::ao::AOSink;
 use std::io;
-use std::os;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Release};
 use std::thread::Thread;
 
-fn usage() {
-    let args = os::args();
-    let name = match args.as_slice().get(0) {
-        Some(s) => s.as_slice(),
-        None => "wavegen"
-    };
-    println!("Usage: {} [silence | sin]", name);
-}
+docopt!(Args, "
+Usage: wavegen [options] [WAVEFORM]
+
+Options:
+    -a AMP, --amplitude=AMP  Adjust amplitude of output waveform [default: 1.0]
+    -h, --help               Show this message.
+
+The following waveforms are supported:
+ * sin: 440 Hz sinusoid
+ * silence: null signal
+", flag_amplitude: Option<f32>);
 
 #[allow(non_snake_case)]
 fn main() {
+    let args: Args = Args::docopt().decode().unwrap_or_else(|e| e.exit());
+
+    let waveform = args.arg_WAVEFORM;
+    let amplitude = args.flag_amplitude.unwrap_or(1.0);
+
     let terminate = Arc::new(AtomicBool::new(false));
     // Will move into the pipeline thread, and we don't need it here
     // beyond requiring that it be initialized in the main thread.
     let AO = ao::AO::init();
 
-    let args = os::args();
-    if args.len() != 2 {
-        usage();
-        return;
-    }
-
     {
         let terminate = terminate.clone();
 
         Thread::spawn(move|| {
-            // TODO would like DST so we don't need to box 'em.
-            let generator: Box<Source<i16>> = match args[1].as_slice() {
+            let generator: Box<Source<i16>> = match waveform.as_slice() {
                 "silence" => box Null::<i16>::new(4096).adapt() as Box<Source<i16>>,
-                "sin" => box Tone::<i16>::new(4096, 44100 / 440).adapt() as Box<Source<i16>>,
-                _ => {
-                    usage();
-                    return;
+                x @ "sin" | x => {
+                    if x != "sin" {
+                        println!("Unrecognized waveform: `{}', defaulting to `sin'", x);
+                    }
+                    box Tone::<i16>::new(4096, 44100 / 440).adapt() as Box<Source<i16>>
                 }
             };
 
             let driver = match AO.get_driver("") {
                 None => {
-                    println!("Failed to get default libao driver");
-                    return;
+                    panic!("Failed to open libao default driver");
                 }
                 Some(driver) => driver
             };
             let sink = AOSink::<i16, _>::new(
-                generator,
+                Amplify::<_, _, f32>::new(generator, amplitude),
                 &driver
             );
 
