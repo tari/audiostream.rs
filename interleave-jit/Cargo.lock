@@ -1,4 +1,4 @@
 [root]
-name = "interleave-jit"
+name = "interleave_jit"
 version = "0.0.1"
 

@@ -5,6 +5,8 @@ authors = [ "peter@taricorp.net" ]
 
 [features]
 default = ["vorbisfile", "ao"]
+# Experimental JIT vectorized interleaving
+interleave-jit = ["interleave_jit"]
 
 [dependencies]
 lazy_static = "*"
@@ -26,4 +28,8 @@ optional = true
 
 [dependencies.ao]
 version = "*"
+optional = true
+
+[dependencies.interleave_jit]
+path = "interleave-jit"
 optional = true
