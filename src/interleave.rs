@@ -70,7 +70,7 @@ pub trait Interleave : super::Sample {
 }
 
 #[cfg(target_arch = "x86_64")]
-static FEATURES: [cpu::Feature, ..2] = [
+static FEATURES: [cpu::Feature; 2] = [
     cpu::AVX,
     cpu::Baseline
 ];
@@ -78,7 +78,7 @@ static FEATURES: [cpu::Feature, ..2] = [
 fn prioritize_features() -> cpu::Feature {
     for &feature in FEATURES.iter() {
         if cpu::cpu_supports(feature) {
-            info!("Detected best CPU feature is {}", feature);
+            info!("Detected best CPU feature is {:?}", feature);
             return feature;
         }
     }
@@ -151,10 +151,10 @@ unsafe fn i16x2_fast_avx(xs: &[i16], ys: &[i16], zs: &mut [i16]) {
     let out = zs.as_mut_ptr();
 
     // Take vectors 8 samples at a time from each channel
-    for i in range(0, n / 8) {
-        let left: *const i16x8 = (a as *const i16x8).offset(i as int);
-        let right: *const i16x8 = (b as *const i16x8).offset(i as int);
-        let mixed: *mut i16x16 = (out as *mut i16x16).offset(i as int);
+    for i in 0..n/8 {
+        let left: *const i16x8 = (a as *const i16x8).offset(i as isize);
+        let right: *const i16x8 = (b as *const i16x8).offset(i as isize);
+        let mixed: *mut i16x16 = (out as *mut i16x16).offset(i as isize);
 
         // vmovdqa would be better, but requires 256-bit memory alignment.
         // Same for vmovaps, but that's more reasonable since it's a 256-bit store.
@@ -172,8 +172,8 @@ unsafe fn i16x2_fast_avx(xs: &[i16], ys: &[i16], zs: &mut [i16]) {
     }
 
     // Non-multiple of 8 tail
-    interleave_arbitrary(&[xs.slice_from(n & !7), ys.slice_from(n & !7)],
-                         zs.slice_from_mut(2 * (n & !7)));
+    interleave_arbitrary(&[&xs[n & !7..], &ys[n & !7..]],
+                         &mut zs[2 * (n & !7)..]);
 }
 
 #[cfg(all(target_arch = "arm", arm_vector = "neon"))]
@@ -230,14 +230,14 @@ mod test {
 
     #[test]
     fn test_interleave_2x2x1024() {
-        let mut a = [0i16, ..1024];
+        let mut a = [0i16; 1024];
         for (i, p) in a.iter_mut().enumerate() {
             *p = i as i16;
         }
         let b = a;
 
         let mut i = unsafe {
-            ::std::mem::uninitialized::<[i16, ..2048]>()
+            ::std::mem::uninitialized::<[i16; 2048]>()
         };
         Interleave::interleave(&[&a, &b], &mut i);
 
@@ -249,14 +249,14 @@ mod test {
 
     #[bench]
     fn bench_interleave_2x2(bencher: &mut Bencher) {
-        let mut a = [0i16, ..2048];
+        let mut a = [0i16; 2048];
         for (i, p) in a.iter_mut().enumerate() {
             *p = i as i16;
         }
         let mut b = a;
 
         let mut i = unsafe {
-            ::std::mem::uninitialized::<[i16, ..4096]>()
+            ::std::mem::uninitialized::<[i16; 4096]>()
         };
 
         bencher.iter(|| Interleave::interleave(&[&mut a, &mut b], &mut i));

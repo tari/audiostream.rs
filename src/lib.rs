@@ -5,66 +5,96 @@
 #![deny(dead_code,missing_docs)]
 
 #![feature(asm)]
-#![feature(default_type_params)]
-#![feature(globs)]
-#![feature(macro_rules)]
-#![feature(phase)]
+#![feature(core)]
+#![feature(custom_attribute)]
+#![feature(plugin)]
 #![feature(simd)]
+#![plugin(quickcheck_macros)]
 
-//! Audio steam pipelines and processing.
+//! Audio stream pipelines and processing.
 //! 
-//! Streams are represented as sequences of buffers, each of which contains
-//! zero or more samples. Data is produced from `Source`s on demand and fed
-//! into a chain of zero or more `Sink`s until it reaches the end of the
-//! pipeline. The pipeline always operates in a "pull" mode, where `Source`s
+//! Streams are represented as sequences of buffers, each of which contains zero or more samples.
+//! Data is produced from `Source`s on demand and fed into a chain of zero or more `Sink`s until it
+//! reaches the end of the pipeline. The pipeline always operates in a "pull" mode, where `Source`s
 //! yield buffers only as fast as requested by a `Sink`.
 //! 
-//! Valid sample formats are represented with the `Sample` trait. In general,
-//! buffers are of type `&[Sample]`, presenting a single channel of audio
-//! data. However, this convention is not enforced.
+//! ## Samples
+//! 
+//! Valid sample formats are bounded by the `Sample` trait. In general a sample will be a primitive
+//! numeric value, though this need not be true. Sample values must always be copyable and sendable
+//! between threads, and most non-trivial stream transformations require that a number of
+//! arithmatic operations be available.
+//!
+//! ### Clipping
+//!
+//! In all formats, the nominal range is between -1 and 1, inclusive. In integer formats, the
+//! logical interpretation is as a fixed-point value with the radix point left-aligned. For
+//! example, a `i8` `Sample` is best considered as a number in range -128/128 through 127/128 by
+//! steps of 1/128.
+//!
+//! A format is considered *soft-clipped* if it is capable of representing values outside the
+//! nominal range. Notably, this applies to floating-point formats where numbers outside the
+//! nominal range can be represented (but perhaps with some loss of precision). The converse of a
+//! hard-clipped format is *soft-clipped*.
+//!
+//! ## Source taxonomy
+//!
+//! From least general to most, there are three classes of sources, each of which yield different
+//! "flavors" of output.
+//!  * `MonoSource`s simply provide a stream of samples of a statically-known format. This stream
+//!  is strictly linear and can only mark end-of-stream.
+//!  * `Source` is the general static element, providing blocks of a statically-known sample
+//!  format. It may pass an arbitrary number of channels at a time and specifies the stream's
+//!  sample rate.
+//!  * A `DynamicSource` has no properties known at compile-time. Sample format and rate are
+//!  specified on a per-buffer basis, requiring reinterpretation of the data before use.
+//!  
+//! A less-general source can always be adapted into a more-general source. A `MonoAdapter`
+//! converts `MonoSource` to `Source`, and `DynAdapter` converts `Source` to `DynamicSource`.
 
-#[phase(plugin)] extern crate lazy_static;
-#[phase(plugin, link)] extern crate log;
+#[macro_use] extern crate lazy_static;
+#[macro_use] extern crate log;
 #[cfg(test)] extern crate test;
+#[cfg(test)] extern crate quickcheck;
 
+extern crate rand;
+
+use std::marker::PhantomData;
 use std::mem;
-use std::num::{NumCast, Float};
+use std::num::{NumCast, Float, FromPrimitive};
+use std::ops::{Add, Mul, Div};
 use std::raw;
 use std::raw::Repr;
 use std::slice::mut_ref_slice;
-use std::sync::atomic::{AtomicBool, Acquire};
+use std::sync::atomic::{AtomicBool, Ordering};
 
-#[cfg(target_arch = "x86_64")] mod cpu;
-mod interleave;
-
-// #{cfg(libao)]
-pub mod ao;
+#[cfg(feature = "ao")] pub mod ao;
+#[cfg(feature = "vorbisfile")] pub mod vorbis;
 pub mod synth;
-// #[cfg(libvorbis)]
-pub mod vorbis;
+
+mod interleave;
+#[cfg(target_arch = "x86_64")] mod cpu;
 
 /// Type bound for sample formats.
-///
-/// Implementation assumes `f64` is sufficient to represent all other formats
-/// without loss.
-// Interleave bound is a little wonky, but necessary because we can't have closed typeclasses nor
-// both generic (T: Sample) and specialized (i16) impls for a given trait.
-pub trait Sample : Add<Self, Self> + Mul<Self, Self> + Div<Self, Self>
-                 + Copy + NumCast + FromPrimitive + ::std::fmt::Show {
+pub trait Sample : Add<Self> + Mul<Self> + Div<Self>
+                 + NumCast + FromPrimitive + ::std::fmt::Debug
+                 + Copy + Send {
+
     /// Maximum value of a valid sample.
     fn max() -> Self;
     /// Minimum value of a valid sample.
     fn min() -> Self;
     /// True if this type has a hard limit on values in range [min, max].
     ///
-    /// If false, values outside this range are representable and may be used.
+    /// If false, values outside this range are representable and may be used but may incur loss of
+    /// precision.
     fn clips_hard() -> bool;
     /// Clip a value to be in range [min, max] (inclusive).
     fn clip(&self) -> Self;
 
     /// Get a floating-point representation of a sample.
     ///
-    /// Full-scale output is in the range -1 to 1. Floating-point inputs may
+    /// Full-scale output is in the range -1 to 1. Soft-clipped types may
     /// yield values outside this range.
     fn to_float<F: Float + Sample>(x: Self) -> F {
         let f: F = NumCast::from(x).unwrap();
@@ -75,13 +105,13 @@ pub trait Sample : Add<Self, Self> + Mul<Self, Self> + Div<Self, Self>
 
     /// Convert a floating-point sample to any other format.
     ///
-    /// Values outside the normal sample range in soft-clipped formats will be
-    /// hard-clipped. In the future this function will not do so when the
-    /// destination formation is also soft-clipped.
-    fn from_float<F: Float + Sample>(x: F) -> Self {
-        // TODO need to check Self::clips_hard() to see if we actually should
-        // clip here.
-        x.clip();
+    /// Values outside the normal sample range in soft-clipped formats will
+    /// not be clipped. When converting to a hard-clipped format, clipping
+    /// may occur.
+    fn from_float<F: Float + Sample>(mut x: F) -> Self {
+        if <Self as Sample>::clips_hard() {
+            x = x.clip();
+        }
 
         let self_max: Self = Sample::max();
         let self_max_f: F = NumCast::from(self_max).unwrap();
@@ -92,25 +122,24 @@ pub trait Sample : Add<Self, Self> + Mul<Self, Self> + Div<Self, Self>
 
     /// Convert from `Self` to an arbitrary other sample format.
     ///
-    /// Does not currently clip values. This should be added.
-    ///
     /// The default intermediate format here is `f64`, capable of losslessly
-    /// converting all formats shorter than 52 bits.
-    fn convert<X: Sample, I: Sample + Float = f64>(a: Self) -> X {
-        let ratio: I = Sample::to_float(a);
-        let x_max: X = Sample::max();
-        let x_max_i: I = NumCast::from(x_max).unwrap();
-
-        NumCast::from(ratio * x_max_i).unwrap()
+    /// converting all formats shorter than 52 bits. For shorter input formats
+    /// (such as i16), f32 is sufficient for lossless conversion.
+    fn convert<X: Sample, I: Float + Sample = f64>(a: Self) -> X {
+        <X as Sample>::from_float(Sample::to_float::<I>(a))
     }
 }
 
 macro_rules! sample_impl(
-    ($t:ty, $min:expr .. $max:expr, $hard:expr) => (
+    ($t:ty, $range:expr, $hard:expr) => (
         impl Sample for $t {
-            fn max() -> $t { $max }
-            fn min() -> $t { $min }
+            #[inline]
+            fn max() -> $t { $range.end }
+            #[inline]
+            fn min() -> $t { $range.start }
+            #[inline]
             fn clips_hard() -> bool { $hard }
+            #[inline]
             fn clip(&self) -> $t {
                 if *self < Sample::min() {
                     Sample::min()
@@ -123,35 +152,47 @@ macro_rules! sample_impl(
         }
     );
     // Implicitly soft-clipped by specified range
-    ($t:ty, $min:expr .. $max:expr) => (
-        sample_impl!($t, $min .. $max, false);
+    ($t:ty, $range:expr) => (
+        sample_impl!($t, $range, false);
     );
     // Implicitly hard-clipped by type's range
     ($t:ty) => (
-        sample_impl!($t, ::std::num::Bounded::min_value()
-                      .. ::std::num::Bounded::max_value(), true);
+        sample_impl!($t, ::std::num::Int::min_value()
+                      .. ::std::num::Int::max_value(), true);
     );
 );
 sample_impl!(i8);
 sample_impl!(i16);
-// Conspicuously missing: i24
+// Conspicuously missing: i24. Probably not a big deal, if we follow ffmpeg's
+// precedent and sign-extend i24 for input.
 sample_impl!(i32);
 sample_impl!(f32, -1.0 .. 1.0);
 sample_impl!(f64, -1.0 .. 1.0);
 
 #[test]
-fn test_to_float() {
-    assert_eq!(64f32 / 32767f32, Sample::to_float(64i16));
+fn test_impl_ranges() {
+    // Implicit ranges
+    assert_eq!(<i16 as Sample>::max(), 32767);
+    assert_eq!(<i16 as Sample>::min(), -32768);
+    assert_eq!(<i16 as Sample>::clips_hard(), true);
+    assert_eq!(0i16.clip(), 0);
+    assert_eq!(32767.clip(), 32767);
+    
+    // Explicit ranges
+    assert_eq!(<f32 as Sample>::max(), 1f32);
+    assert_eq!(<f32 as Sample>::min(), -1f32);
+    assert_eq!(<f32 as Sample>::clips_hard(), false);
+    assert_eq!(0f32.clip(), 0f32);
+    assert_eq!(-2f32.clip(), -1f32);
 }
 
-#[test]
-fn test_from_float() {
-    let x: f32 = 64.0 / 32767.0;
-    assert_eq!(64i16, Sample::from_float(x));
+#[quickcheck]
+fn float_roundtrip_is_lossless(x: i16) -> bool {
+    x == Sample::from_float(Sample::to_float::<f32>(x))
 }
 
 /// Output from `Source` pull.
-#[deriving(Show, PartialEq)]
+#[derive(Debug, PartialEq)]
 pub enum SourceResult<'a, T:'a> {
     /// Channel-major buffer of samples.
     ///
@@ -159,7 +200,7 @@ pub enum SourceResult<'a, T:'a> {
     /// least one channel.
     Buffer(&'a mut [&'a mut [T]]),
     /// Following samples have the specified rate (in Hz).
-    SampleRate(uint),
+    SampleRate(u32),
     /// Reached stream end.
     EndOfStream,
     /// There was an error in the stream.
@@ -169,26 +210,102 @@ pub enum SourceResult<'a, T:'a> {
 /// A source of samples with defined sample rate.
 ///
 /// Generates buffers of samples of type `T` and passes them to a consumer.
-pub trait Source<T> {
+pub trait Source {
+    /// The sample format emitted by this source.
+    type Output: Sample;
     /// Emit the next buffer.
-    fn next<'a>(&'a mut self) -> SourceResult<'a, T>;
+    fn next<'a>(&'a mut self) -> SourceResult<'a, Self::Output>;
 }
 
-impl<'z, F> Source<F> for Box<Source<F> + 'z> {
+impl<'z, F: Sample> Source for Box<Source<Output=F> + 'z> {
+    type Output = F;
+
     fn next<'a>(&'a mut self) -> SourceResult<'a, F> {
-        self.deref_mut().next()
+        (**self).next()
     }
 }
+
+/// The result of pulling from a `DynamicSource`.
+#[unstable = "Current implementation is probably wrong"]
+pub struct DynBuffer<'z> {
+    /// Raw bytes of sample data.
+    /// TODO Any might be more appropriate, particularly for externally-defined sample formats.
+    /// It's very easy for us to get confused by one of those.
+    pub bytes: &'z mut [&'z mut [u8]],
+    /// Size of individual samples, in bits.
+    ///
+    /// Note that it's impossible to tell what actual format
+    pub sample_size: u8,
+    /// Sample rate in Hz
+    pub sample_rate: u32
+}
+
+/// A `Source` with format known only at runtime.
+#[unstable = "Needs better design"]
+pub trait DynamicSource {
+    /// Pull the next buffer from the source
+    fn next_dyn<'a>(&'a mut self) -> Option<DynBuffer<'a>>;
+}
+
+/// Adapts a normal `Source` into a `DynamicSource`.
+#[warn(dead_code)]
+pub struct DynAdapter<S> {
+    sample_rate: u32,
+    source: S
+}
+
+impl<S: Source> DynAdapter<S> {
+    /// Construct a dynamic source adapter from a plain `Source`.
+    pub fn from_source(source: S) -> DynAdapter<S> {
+        DynAdapter {
+            sample_rate: 0,
+            source: source
+        }
+    }
+}
+
+/*impl<S> DynamicSource for DynAdapter<S> where S: Source {
+    fn next_dyn<'a>(&'a mut self) -> Option<DynBuffer> {
+        loop {
+            match self.source.next() {
+                SourceResult::EndOfStream |
+                SourceResult::StreamError(_) => return None,
+                SourceResult::SampleRate(sr) => self.sample_rate = sr,
+                SourceResult::Buffer(b) => unsafe {
+                    // Get bytes only. This transmute makes the len field
+                    // of the inner slices wrong becasuse we're changing the
+                    // contained type.
+                    let mut b = mem::transmute::<&'a mut [&'a mut [<S as Source>::Output]],
+                                                 &'a mut [raw::Slice<u8>]>(b);
+                    // Correct the len field of channel buffers
+                    for i in 0 .. b.len() {
+                        b[i].len *= mem::size_of::<<S as Source>::Output>();
+                    }
+                    
+                    return Some(DynBuffer {
+                        bytes: mem::transmute::<&'a mut [raw::Slice<u8>],
+                                                &'a mut [&'a mut [u8]]>(b),
+                        sample_size: mem::size_of::<<S as Source>::Output>() as u8,
+                        sample_rate: self.sample_rate
+                    })
+                }
+            }
+        }
+    }
+}*/
 
 /// A `Source` that only generates one channel at an indeterminate sample rate.
 ///
 /// To generalize to a full `Source`, use the `adapt` method.
-pub trait MonoSource<T> {
+pub trait MonoSource : Sized {
+    /// The sample format yielded by this source.
+    type Output;
+
     /// Get the next set of samples.
-    fn next<'a>(&'a mut self) -> Option<&'a mut [T]>;
+    fn next<'a>(&'a mut self) -> Option<&'a mut [Self::Output]>;
 
     /// Adapts a `MonoSource` into a (more general) `Source`.
-    fn adapt(self) -> MonoAdapter<T, Self> {
+    fn adapt(self) -> MonoAdapter<Self::Output, Self> {
         MonoAdapter {
             src: self,
             bp: raw::Slice {
@@ -205,7 +322,11 @@ pub struct MonoAdapter<F, T> {
     bp: raw::Slice<F>
 }
 
-impl<F, T: MonoSource<F>> Source<F> for MonoAdapter<F, T> {
+impl<F, T> Source for MonoAdapter<F, T> where
+        F: Sample,
+        T: MonoSource<Output=F> {
+    type Output = F;
+
     fn next<'a>(&'a mut self) -> SourceResult<'a, F> {
         // bp is a bit of a hack, since a function-local can't live long enough to be returned. We
         // drop the slice into a struct-private field so the pointers remain live, and it remains
@@ -222,6 +343,14 @@ impl<F, T: MonoSource<F>> Source<F> for MonoAdapter<F, T> {
                 mut_ref_slice(&mut self.bp)
             )
         })
+    }
+}
+
+impl<F, T> ::std::ops::Deref for MonoAdapter<F, T> {
+    type Target = T;
+
+    fn deref(&self) -> &T {
+        &self.src
     }
 }
 
@@ -243,7 +372,7 @@ pub trait Sink {
     /// calling `run_once` until it returns `None`.
     fn run(&mut self, term_cond: &AtomicBool) {
         loop {
-            if term_cond.load(Acquire) || self.run_once().is_none() {
+            if term_cond.load(Ordering::Acquire) || self.run_once().is_none() {
                 return;
             }
         }
@@ -267,14 +396,16 @@ impl<F: Sample> UninitializedSource<F> {
     /// Create a source of uncontrolled samples.
     /// 
     /// The yielded buffers will have `size` items.
-    pub fn new(size: uint) -> UninitializedSource<F> {
+    pub fn new(size: usize) -> UninitializedSource<F> {
         UninitializedSource {
-            buffer: Vec::from_fn(size, |_| FromPrimitive::from_uint(0).unwrap())
+            buffer: (0..size).map(|_| FromPrimitive::from_usize(0).unwrap()).collect()
         }
     }
 }
 
-impl<F> MonoSource<F> for UninitializedSource<F> {
+impl<F> MonoSource for UninitializedSource<F> {
+    type Output = F;
+
     fn next<'a>(&'a mut self) -> Option<&'a mut [F]> {
         Some(self.buffer.as_mut_slice())
     }
@@ -289,9 +420,9 @@ impl<F> MonoSource<F> for UninitializedSource<F> {
 /// Due to mutability requirements for channel data, this always makes a copy.
 pub struct CopyChannel<F, S> {
     /// Channel index (from 0) to copy from.
-    from: uint,
+    from: usize,
     /// Channel index to copy to.
-    to: uint,
+    to: usize,
     source: S,
     // Contents of `slices` must never outlive the scope in which they are
     // assigned to maintain safety. Covariant lifetime is used to allow the
@@ -300,9 +431,9 @@ pub struct CopyChannel<F, S> {
     samples: Vec<F>,
 }
 
-impl<F: Sample, S> CopyChannel<F, S> where S: Source<F> {
+impl<F: Sample, S> CopyChannel<F, S> where S: Source<Output=F> {
     /// Create a new `CopyChannel`.
-    pub fn new(from: uint, to: uint, source: S) -> CopyChannel<F, S> {
+    pub fn new(from: usize, to: usize, source: S) -> CopyChannel<F, S> {
         CopyChannel {
             from: from,
             to: to,
@@ -313,7 +444,9 @@ impl<F: Sample, S> CopyChannel<F, S> where S: Source<F> {
     }
 }
 
-impl<F: Sample, S: Source<F>> Source<F> for CopyChannel<F, S> {
+impl<F: Sample, S: Source<Output=F>> Source for CopyChannel<F, S> {
+    type Output = F;
+
     fn next<'a>(&'a mut self) -> SourceResult<'a, F> {
         let b: &'a mut [&'a mut [F]] = match self.source.next() {
             SourceResult::Buffer(b) => b,
@@ -349,7 +482,8 @@ impl<F: Sample, S: Source<F>> Source<F> for CopyChannel<F, S> {
 #[allow(dead_code)]
 pub struct Amplify<F, S, P> {
     factor: P,
-    source: S
+    source: S,
+    format: PhantomData<F>
 }
 
 impl<F, S, P> Amplify<F, S, P> {
@@ -357,12 +491,15 @@ impl<F, S, P> Amplify<F, S, P> {
     pub fn new(source: S, factor: P) -> Amplify<F, S, P> {
         Amplify {
             factor: factor,
-            source: source
+            source: source,
+            format: PhantomData
         }
     }
 }
 
-impl<F: Sample, S: Source<F>, P: Float + Sample> Source<F> for Amplify<F, S, P> {
+impl<F: Sample, S: Source<Output=F>, P: Float + Sample> Source for Amplify<F, S, P> {
+    type Output = F;
+
     fn next<'a>(&'a mut self) -> SourceResult<'a, F> {
         let buf = match self.source.next() {
             SourceResult::Buffer(b) => b,
@@ -389,7 +526,9 @@ mod tests {
         sbuf: Vec<F>
     }
 
-    impl<F: Sample + Clone> MonoSource<F> for ConstantSource<F> {
+    impl<F: Sample + Clone> MonoSource for ConstantSource<F> {
+        type Output = F;
+
         fn next<'a>(&'a mut self) -> Option<&'a mut [F]> {
             self.sbuf = self.data.clone();
             Some(self.sbuf.as_mut_slice())
@@ -402,6 +541,20 @@ mod tests {
                 data: vec![],
                 sbuf: vec![]
             }
+        }
+    }
+
+
+    #[quickcheck]
+    fn copychannel_copies_channels(xs: Vec<i16>) -> bool {
+        let mut src = super::CopyChannel::new(0, 1, ConstantSource::<i16> {
+            data: xs.clone(),
+            sbuf: vec![]
+        }.adapt());
+        if let SourceResult::Buffer(out) = src.next() {
+            out[1] == xs && out[0] == out[1]
+        } else {
+            unreachable!();
         }
     }
 

@@ -2,10 +2,14 @@
 
 use super::{Sample, MonoSource, UninitializedSource};
 use std::f64::consts::PI_2;
-use std::iter::{Range, Cycle};
-use std::num::{NumCast, FloatMath};
-use std::rand::Rng;
-use std::rand::distributions::{IndependentSample, Normal};
+use std::iter::Cycle;
+use std::marker::PhantomData;
+use std::num::{NumCast, Float, FromPrimitive};
+use std::ops::Range;
+
+use rand::Rng;
+use rand::distributions::{IndependentSample, Normal};
+
 #[cfg(test)]
 use test::Bencher;
 
@@ -16,18 +20,20 @@ pub struct Null<F> {
 
 impl<F: Sample> Null<F> {
     /// Create a source of pure silence for buffers of `size` samples.
-    pub fn new(size: uint) -> Null<F> {
+    pub fn new(size: usize) -> Null<F> {
         Null {
             src: UninitializedSource::new(size)
         }
     }
 }
 
-impl<F: Sample> MonoSource<F> for Null<F> {
+impl<F: Sample> MonoSource for Null<F> {
+    type Output = F;
+
     fn next<'a>(&'a mut self) -> Option<&'a mut [F]> {
         self.src.next().map(|buf| {
             for x in buf.iter_mut() {
-                *x = FromPrimitive::from_uint(0).unwrap();
+                *x = FromPrimitive::from_usize(0).unwrap();
             }
             buf
         })
@@ -53,34 +59,38 @@ fn generate_silence(b: &mut Bencher) {
 /// will be generated. Some users may wish to use `f64` for greater precision
 /// in signals with long period, or other types according to the application's
 /// required precision.
-pub struct Tone<F, P> {
+pub struct Tone<F, P=f32> {
     src: UninitializedSource<F>,
-    timebase: Cycle<Range<uint>>,
-    period: uint
+    timebase: Cycle<Range<usize>>,
+    period: usize,
+    gentype: PhantomData<P>
 }
 
 impl<F: Sample, P = f32> Tone<F, P> {
     /// Create a pure tone generator with a specified period in samples for
     /// buffers of `size` samples.
-    pub fn new(size: uint, period: uint) -> Tone<F, P> {
+    pub fn new(size: usize, period: usize) -> Tone<F, P> {
         Tone {
             src: UninitializedSource::new(size),
-            timebase: range(0, period).cycle(),
-            period: period
+            timebase: (0..period).cycle(),
+            period: period,
+            gentype: PhantomData
         }
     }
 }
 
-// TODO FloatMath is kinda slow-feeling. Prefer a custom Sinusoid
-// trait that can avoid floats.
-impl<F: Sample, P: Sample+FloatMath> MonoSource<F> for Tone<F, P> {
+// TODO Float is kinda slow-feeling. Prefer a custom Sinusoid
+// trait that can avoid floats sometimes.
+impl<F: Sample, P: Sample+Float> MonoSource for Tone<F, P> {
+    type Output = F;
+
     fn next<'a>(&'a mut self) -> Option<&'a mut [F]> {
         let buf = match self.src.next() {
             Some(b) => b,
             None => return None
         };
 
-        for (x, t) in buf.iter_mut().zip(self.timebase) {
+        for (x, t) in buf.iter_mut().zip(self.timebase.by_ref()) {
             let mut y: P = NumCast::from(t).unwrap();
             y = y * NumCast::from(PI_2).unwrap();
             y = y / NumCast::from(self.period).unwrap();
@@ -109,7 +119,7 @@ pub struct WhiteNoise<F, R> {
 
 impl<R: Rng> WhiteNoise<f64, R> {
     /// Create a white noise generator for buffers of `size` samples.
-    pub fn new(size: uint, rng: R) -> WhiteNoise<f64, R> {
+    pub fn new(size: usize, rng: R) -> WhiteNoise<f64, R> {
         WhiteNoise {
             rng: rng,
             normal: Normal::new(0f64, 0.25),
@@ -118,7 +128,9 @@ impl<R: Rng> WhiteNoise<f64, R> {
     }
 }
 
-impl<R: Rng> MonoSource<f64> for WhiteNoise<f64, R> {
+impl<R: Rng> MonoSource for WhiteNoise<f64, R> {
+    type Output = f64;
+
     fn next<'a>(&'a mut self) -> Option<&'a mut [f64]> {
         let buf = match self.src.next() {
             Some(b) => b,
@@ -134,9 +146,11 @@ impl<R: Rng> MonoSource<f64> for WhiteNoise<f64, R> {
 
 #[bench]
 fn generate_xorshift_noise_44100(b: &mut Bencher) {
+    use super::MonoSource;
+    use rand;
+
     let bufsize = 4096;
-    let mut src = WhiteNoise::new(bufsize,
-            ::std::rand::XorShiftRng::new_unseeded());
+    let mut src = WhiteNoise::new(bufsize, rand::XorShiftRng::new_unseeded());
     b.bytes = ::std::mem::size_of::<f64>() as u64 * bufsize as u64;
 
     b.iter(|| {

@@ -15,7 +15,9 @@ pub struct AOSink<'a, F, R> {
     source: R,
 }
 
-impl<'a, F: ao::Sample, R: Source<F>> AOSink<'a, F, R> {
+impl<'a, F, R> AOSink<'a, F, R>  where
+        F: ao::Sample,
+        R: Source<Output=F> {
     /// Construct a libao sink.
     pub fn new(source: R, driver: &ao::Driver<'a>) -> ao::AoResult<AOSink<'a, F, R>> {
 
@@ -37,7 +39,7 @@ impl<'a, F: ao::Sample, R: Source<F>> AOSink<'a, F, R> {
     }
 }
 
-impl<'a, F: ao::Sample + Interleave, R: Source<F>> Sink for AOSink<'a, F, R> {
+impl<'a, F: ao::Sample + Interleave, R: Source<Output=F>> Sink for AOSink<'a, F, R> {
     fn run_once(&mut self) -> Option<()> {
         match self.source.next() {
             SourceResult::Buffer(channels) => {
@@ -59,3 +61,22 @@ impl<'a, F: ao::Sample + Interleave, R: Source<F>> Sink for AOSink<'a, F, R> {
         }
     }
 }
+
+/// Dynamic-format AO output.
+#[warn(dead_code)]
+pub struct AOAutoWriterSink<'a, R, W, _S> {
+    /// Writer which receives data from libao
+    dest: W,
+    /// libao device handle
+    device: ao::auto::AutoFormatDevice<'a, _S>,
+    /// Source this receives data from.
+    source: R
+}
+
+// TODO we really want dynamic format support for sinks here.
+/*impl<'a, R, W, _S> AOAutoSink<'a, R, W, _S> where
+        R: DynamicSource,
+        W: Writer,
+        _S: Str {
+
+}*/

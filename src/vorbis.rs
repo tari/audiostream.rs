@@ -29,7 +29,9 @@ impl<R: Reader> VorbisStream<R> {
 
 // The native result type for vorbis is a C float. ov_read() postprocesses into
 // integer samples, which we're equally capable of doing.
-impl<R: Reader> Source<f32> for VorbisStream<R> {
+impl<R: Reader> Source for VorbisStream<R> {
+    type Output = f32;
+
     fn next<'a>(&'a mut self) -> SourceResult<'a, f32> {
         // TODO report sample rate
         match self.src.decode() {

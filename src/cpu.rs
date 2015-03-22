@@ -1,4 +1,5 @@
 use std::str::FromStr;
+use std::env;
 
 pub use self::innards::Feature;
 
@@ -8,8 +9,6 @@ pub use self::innards::Feature::{Baseline, MMX, SSE, SSE2, SSE3, SSSE3, SSE41,
 #[cfg(target_arch = "arm")]
 pub use self::innards::Feature::{Baseline, NEON};
 
-use std::os;
-
 lazy_static!{
     static ref FEATURES_OVERRIDE: (Vec<Feature>, Vec<Feature>) = parse_env_overrides();
 }
@@ -18,19 +17,23 @@ fn parse_env_overrides() -> (Vec<Feature>, Vec<Feature>) {
     let mut blacklist = Vec::<Feature>::new();
     let mut whitelist = Vec::<Feature>::new();
 
-    let eo = match os::getenv("CPU_FEATURES_OVERRIDE") {
-        None => {
+    let eo = match env::var("CPU_FEATURES_OVERRIDE") {
+        Err(env::VarError::NotPresent) => {
             return (blacklist, whitelist);
         }
-        Some(s) => s
+        Err(e) => {
+            error!("Could not interpret CPU_FEATURES_OVERRIDE: {}", e);
+            return (blacklist, whitelist);
+        }
+        Ok(s) => s
     };
 
     let plusminus: &[_] = &['+', '-'];
     for feature_spec in eo.as_slice().split(',') {
-        let name = feature_spec.trim_left_chars(plusminus);
+        let name = feature_spec.trim_left_matches(plusminus);
         let feature: Feature = match FromStr::from_str(name) {
-            Some(f) => f,
-            None => {
+            Ok(f) => f,
+            Err(_) => {
                 error!("Invalid CPU feature: {}", name);
                 continue;
             }
@@ -79,7 +82,7 @@ mod innards {
     use self::Feature::*;
     use std::str::FromStr;
 
-    #[deriving(PartialEq, Eq, Show)]
+    #[derive(PartialEq, Eq, Debug)]
     pub enum Feature {
         Baseline,
         MMX,
@@ -95,8 +98,10 @@ mod innards {
     }
 
     impl FromStr for Feature {
-        fn from_str(s: &str) -> Option<Feature> {
-            Some(match s {
+        type Err = ();
+
+        fn from_str(s: &str) -> Result<Feature, <Self as FromStr>::Err> {
+            Ok(match s {
                 "MMX" => MMX,
                 "SSE" => SSE,
                 "SSE2" => SSE2,
@@ -108,50 +113,53 @@ mod innards {
                 "AVX" => AVX,
                 "AVX2" => AVX2,
                 _ => {
-                    return None;
+                    return Err(());
                 }
             })
         }
     }
 
-    static EBX: uint = 1;
-    static ECX: uint = 2;
-    static EDX: uint = 3;
+    static EBX: usize = 1;
+    static ECX: usize = 2;
+    static EDX: usize = 3;
     macro_rules! feature(
-        ($p_eax:expr : $p_ecx:expr, $reg:expr, $bit:expr) => (
+        // Select bit in output register from CPUID with specified input values
+        // of EAX and ECX.
+        ($p_eax:expr, $p_ecx:expr, $reg:expr, $bit:expr) => (
             {
-                let mut regs = [0u32, ..4];
+                let mut regs = [0u32; 4];
                 do_cpuid($p_eax, $p_ecx, &mut regs);
 
                 regs[$reg] & (1 << $bit) != 0
             }
         );
 
-        ($reg:expr $bit:expr) => (
-            feature!(1:0, $reg, $bit)
+        // Implicit features leaf EAX=1 ECX=0
+        ($reg:expr, $bit:expr) => (
+            feature!(1, 0, $reg, $bit)
         )
     );
 
     pub fn cpu_supports(feature: Feature) -> bool {
         match feature {
             Baseline => true,
-            MMX => feature!(EDX 23),
-            SSE => feature!(EDX 25),
-            SSE2 => feature!(EDX 26),
-            SSE3 => feature!(ECX 0),
-            SSSE3 => feature!(ECX 9),
-            SSE41 => feature!(ECX 19),
-            SSE42 => feature!(ECX 20),
-            OSXSAVE => feature!(ECX 27),
+            MMX => feature!(EDX, 23),
+            SSE => feature!(EDX, 25),
+            SSE2 => feature!(EDX, 26),
+            SSE3 => feature!(ECX, 0),
+            SSSE3 => feature!(ECX, 9),
+            SSE41 => feature!(ECX, 19),
+            SSE42 => feature!(ECX, 20),
+            OSXSAVE => feature!(ECX, 27),
             AVX => {
                 // Requires that OS support for XSAVE be in use and enabled for AVX
                 cpu_supports(OSXSAVE)
                 && (do_xgetbv(0) & 6 == 6)
-                && feature!(ECX 28)
+                && feature!(ECX, 28)
             }
             AVX2 => {
                 // Need OS support for AVX and AVX2 feature flag
-                cpu_supports(AVX) && feature!(7:0, EBX, 5)
+                cpu_supports(AVX) && feature!(7, 0, EBX, 5)
             }
         }
     }
@@ -185,7 +193,7 @@ mod innards {
             }
         }
 
-        (high as u64 << 32) | low as u64
+        ((high as u64) << 32) | low as u64
     }
 }
 
@@ -193,7 +201,7 @@ mod innards {
 mod innards {
     use std::from_str::FromStr;
 
-    #[deriving(PartialEq, Eq, Show)]
+    #[derive(PartialEq, Eq, Debug)]
     pub enum Feature {
         Baseline,
         NEON

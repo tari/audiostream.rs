@@ -1,14 +1,29 @@
 [package]
 name = "audiostream"
-version = "0.1.1"
+version = "0.1.2"
 authors = [ "peter@taricorp.net" ]
 
+[features]
+default = ["vorbisfile", "ao"]
+
 [dependencies]
-ao = "*"
 lazy_static = "*"
+log = "*"
+rand = "*"
+rustc-serialize = "*"
+# These should be dev-dependencies but it appears we can't conditionally
+# use a plugin.
+quickcheck_macros = "*"
+quickcheck = "*"
+
+[dev-dependencies]
+docopt = "*"
+docopt_macros = "*"
 
 [dependencies.vorbisfile]
 git = "https://github.com/tari/vorbisfile.rs"
+optional = true
 
-[dev-dependencies]
-docopt_macros = "*"
+[dependencies.ao]
+version = "*"
+optional = true

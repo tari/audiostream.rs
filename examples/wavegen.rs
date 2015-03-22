@@ -1,18 +1,18 @@
-#![feature(phase)]
+#![feature(plugin)]
+#![plugin(docopt_macros)]
 
 extern crate ao;
 extern crate audiostream;
 extern crate docopt;
-#[phase(plugin)] extern crate docopt_macros;
 extern crate "rustc-serialize" as rustc_serialize;
 
 use audiostream::{Sink, MonoSource, Source, Amplify};
 use audiostream::synth::{Null, Tone};
 use audiostream::ao::AOSink;
-use std::io;
+use std::io::{self, BufRead};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Release};
-use std::thread::Thread;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::thread;
 
 docopt!(Args, "
 Usage: wavegen [options] [WAVEFORM]
@@ -41,14 +41,18 @@ fn main() {
     {
         let terminate = terminate.clone();
 
-        Thread::spawn(move|| {
-            let generator: Box<Source<i16>> = match waveform.as_slice() {
-                "silence" => box Null::<i16>::new(4096).adapt() as Box<Source<i16>>,
+        thread::spawn(move|| {
+            let generator: Box<Source<Output=i16>> = match &waveform[..] {
+                "silence" => Box::new(
+                    Null::<i16>::new(4096).adapt()
+                ) as Box<Source<Output=i16>>,
                 x @ "sin" | x => {
                     if x != "sin" {
                         println!("Unrecognized waveform: `{}', defaulting to `sin'", x);
                     }
-                    box Tone::<i16>::new(4096, 44100 / 440).adapt() as Box<Source<i16>>
+                    Box::new(
+                        Tone::<i16>::new(4096, 44100 / 440).adapt()
+                    ) as Box<Source<Output=i16>>
                 }
             };
 
@@ -71,13 +75,16 @@ fn main() {
                 Ok(s) => s
             };
             println!("Press ENTER to exit.");
-            sink.run(terminate.deref());
-        }).detach()
+            sink.run(&*terminate);
+        });
     }
 
-    match io::stdin().read_line() {
+    let mut s = String::new();
+    let mut _stdin = io::stdin();
+    let mut stdin = _stdin.lock();
+    match stdin.read_line(&mut s) {
         Ok(_) => {
-            terminate.store(true, Release);
+            terminate.store(true, Ordering::Release);
             println!("Terminating.")
         }
         Err(e) => println!("I/O error on stdin: {}", e),
