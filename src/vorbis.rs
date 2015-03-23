@@ -9,6 +9,7 @@
 
 extern crate vorbisfile;
 
+use std::io::Read;
 use super::{Source, SourceResult};
 use super::SourceResult::{Buffer, StreamError, EndOfStream};
 use self::vorbisfile::OVResult;
@@ -18,7 +19,7 @@ pub struct VorbisStream<R> {
     src: vorbisfile::VorbisFile<R>,
 }
 
-impl<R: Reader> VorbisStream<R> {
+impl<R: Read> VorbisStream<R> {
     /// Open a new decoder.
     pub fn open(reader: R) -> OVResult<VorbisStream<R>> {
         Ok(VorbisStream {
@@ -29,7 +30,7 @@ impl<R: Reader> VorbisStream<R> {
 
 // The native result type for vorbis is a C float. ov_read() postprocesses into
 // integer samples, which we're equally capable of doing.
-impl<R: Reader> Source for VorbisStream<R> {
+impl<R: Read> Source for VorbisStream<R> {
     type Output = f32;
 
     fn next<'a>(&'a mut self) -> SourceResult<'a, f32> {
