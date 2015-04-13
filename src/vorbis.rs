@@ -15,7 +15,7 @@ use super::SourceResult::{Buffer, StreamError, EndOfStream};
 use self::vorbisfile::OVResult;
 
 /// Ogg Vorbis decoder.
-pub struct VorbisStream<R> {
+pub struct VorbisStream<R: Read> {
     src: vorbisfile::VorbisFile<R>,
 }
 

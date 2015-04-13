@@ -49,10 +49,10 @@ impl<'a, F: ao::Sample + Interleave, R: Source<Output=F>> Sink for AOSink<'a, F,
                 unsafe {
                     self.interleave_buf.set_len(len);
                     // Transmute hack to lose `mut` on each channel.
-                    Interleave::interleave(mem::transmute(channels), self.interleave_buf.as_mut_slice());
+                    Interleave::interleave(mem::transmute(channels), &mut self.interleave_buf);
                 }
 
-                self.device.play(self.interleave_buf.as_slice());
+                self.device.play(&self.interleave_buf);
                 // Drop all interleaved samples
                 self.interleave_buf.truncate(0);
                 Some(())

@@ -29,7 +29,7 @@ fn parse_env_overrides() -> (Vec<Feature>, Vec<Feature>) {
     };
 
     let plusminus: &[_] = &['+', '-'];
-    for feature_spec in eo.as_slice().split(',') {
+    for feature_spec in eo.split(',') {
         let name = feature_spec.trim_left_matches(plusminus);
         let feature: Feature = match FromStr::from_str(name) {
             Ok(f) => f,
@@ -82,7 +82,7 @@ mod innards {
     use self::Feature::*;
     use std::str::FromStr;
 
-    #[derive(PartialEq, Eq, Debug)]
+    #[derive(PartialEq, Eq, Debug, Clone, Copy)]
     pub enum Feature {
         Baseline,
         MMX,
@@ -201,7 +201,7 @@ mod innards {
 mod innards {
     use std::from_str::FromStr;
 
-    #[derive(PartialEq, Eq, Debug)]
+    #[derive(PartialEq, Eq, Debug, Clone, Copy)]
     pub enum Feature {
         Baseline,
         NEON
@@ -225,5 +225,3 @@ mod innards {
         }
     }
 }
-
-impl Copy for self::innards::Feature { }

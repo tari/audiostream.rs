@@ -1,7 +1,6 @@
 #![crate_name = "audiostream"]
 #![doc(html_root_url = "http://www.rust-ci.org/tari/audiostream.rs/doc/audiostream/")]
 
-#![experimental]
 #![deny(dead_code,missing_docs)]
 
 #![feature(asm)]
@@ -9,6 +8,8 @@
 #![feature(custom_attribute)]
 #![feature(plugin)]
 #![feature(simd)]
+#![feature(slice_patterns)]
+#![feature(str_char)]
 #![plugin(quickcheck_macros)]
 
 //! Audio stream pipelines and processing.
@@ -407,7 +408,7 @@ impl<F> MonoSource for UninitializedSource<F> {
     type Output = F;
 
     fn next<'a>(&'a mut self) -> Option<&'a mut [F]> {
-        Some(self.buffer.as_mut_slice())
+        Some(&mut self.buffer)
     }
 }
 
@@ -464,13 +465,13 @@ impl<F: Sample, S: Source<Output=F>> Source for CopyChannel<F, S> {
         self.samples.extend(b[self.from].iter().map(|x| *x));
         if self.to == b.len() {
             self.slices.push(unsafe {
-                mem::transmute::<&'a mut [F], raw::Slice<F>>(self.samples.as_mut_slice())
+                mem::transmute::<&'a mut [F], raw::Slice<F>>(&mut self.samples)
             });
         } else {
             self.slices[self.to] = self.slices[self.from];
         }
         SourceResult::Buffer(unsafe {
-            mem::transmute::<&mut [raw::Slice<F>],&'a mut [&'a mut [F]]>(self.slices.as_mut_slice())
+            mem::transmute::<&mut [raw::Slice<F>],&'a mut [&'a mut [F]]>(&mut self.slices)
         })
     }
 }
