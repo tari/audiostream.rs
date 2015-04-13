@@ -241,7 +241,7 @@ mod test {
         };
         Interleave::interleave(&[&a, &b], &mut i);
 
-        for idx in ::std::iter::range(0, i.len() / 2) {
+        for idx in 0 .. i.len() / 2 {
             assert_eq!(i[idx * 2], idx as i16);
             assert_eq!(i[idx * 2 + 1], idx as i16);
         }

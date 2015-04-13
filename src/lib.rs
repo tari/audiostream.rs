@@ -10,6 +10,7 @@
 #![feature(simd)]
 #![feature(slice_patterns)]
 #![feature(str_char)]
+#![feature(test)]
 #![plugin(quickcheck_macros)]
 
 //! Audio stream pipelines and processing.
@@ -532,7 +533,7 @@ mod tests {
 
         fn next<'a>(&'a mut self) -> Option<&'a mut [F]> {
             self.sbuf = self.data.clone();
-            Some(self.sbuf.as_mut_slice())
+            Some(&mut self.sbuf)
         }
     }
 
@@ -553,7 +554,7 @@ mod tests {
             sbuf: vec![]
         }.adapt());
         if let SourceResult::Buffer(out) = src.next() {
-            out[1] == xs && out[0] == out[1]
+            out[1] == &xs[..] && out[0] == out[1]
         } else {
             unreachable!();
         }

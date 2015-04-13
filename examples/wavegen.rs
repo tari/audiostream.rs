@@ -4,7 +4,7 @@
 extern crate ao;
 extern crate audiostream;
 extern crate docopt;
-extern crate "rustc-serialize" as rustc_serialize;
+extern crate rustc_serialize;
 
 use audiostream::{Sink, MonoSource, Source, Amplify};
 use audiostream::synth::{Null, Tone};
