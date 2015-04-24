@@ -59,11 +59,12 @@
 #[cfg(test)] extern crate test;
 #[cfg(test)] extern crate quickcheck;
 
+extern crate num;
 extern crate rand;
 
+use num::{NumCast, Float, FromPrimitive};
 use std::marker::PhantomData;
 use std::mem;
-use std::num::{NumCast, Float, FromPrimitive};
 use std::ops::{Add, Mul, Div};
 use std::raw;
 use std::raw::Repr;
@@ -158,9 +159,9 @@ macro_rules! sample_impl(
         sample_impl!($t, $range, false);
     );
     // Implicitly hard-clipped by type's range
-    ($t:ty) => (
-        sample_impl!($t, ::std::num::Int::min_value()
-                      .. ::std::num::Int::max_value(), true);
+    ($t:ident) => (
+        sample_impl!($t, $t::min_value()
+                      .. $t::max_value(), true);
     );
 );
 sample_impl!(i8);
@@ -228,7 +229,9 @@ impl<'z, F: Sample> Source for Box<Source<Output=F> + 'z> {
 }
 
 /// The result of pulling from a `DynamicSource`.
-#[unstable = "Current implementation is probably wrong"]
+///
+/// You probably shouldn't use this because it's experimental.
+// XXX
 pub struct DynBuffer<'z> {
     /// Raw bytes of sample data.
     /// TODO Any might be more appropriate, particularly for externally-defined sample formats.
@@ -243,7 +246,9 @@ pub struct DynBuffer<'z> {
 }
 
 /// A `Source` with format known only at runtime.
-#[unstable = "Needs better design"]
+///
+/// You probably shouldn't use this because it's experimental.
+// XXX
 pub trait DynamicSource {
     /// Pull the next buffer from the source
     fn next_dyn<'a>(&'a mut self) -> Option<DynBuffer<'a>>;

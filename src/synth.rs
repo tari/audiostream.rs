@@ -1,10 +1,10 @@
 //! Signal synthesizers.
 
+use num::{NumCast, Float, FromPrimitive};
 use super::{Sample, MonoSource, UninitializedSource};
 use std::f64::consts::PI_2;
 use std::iter::Cycle;
 use std::marker::PhantomData;
-use std::num::{NumCast, Float, FromPrimitive};
 use std::ops::Range;
 
 use rand::Rng;

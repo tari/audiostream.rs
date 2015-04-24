@@ -12,6 +12,7 @@ interleave-jit = ["interleave_jit"]
 lazy_static = "*"
 libc = "*"
 log = "*"
+num = "*"
 rand = "*"
 rustc-serialize = "*"
 # These should be dev-dependencies but it appears we can't conditionally
