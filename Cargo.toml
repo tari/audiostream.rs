@@ -3,6 +3,9 @@ name = "audiostream"
 version = "0.1.3"
 authors = [ "peter@taricorp.net" ]
 
+documentation = "http://rustdoc.taricorp.net/audiostream/audiostream/"
+repository = "https://bitbucket.org/tari/audiostream.rs/"
+
 [features]
 default = ["vorbisfile", "ao"]
 # Experimental JIT vectorized interleaving
@@ -25,7 +28,7 @@ docopt = "*"
 docopt_macros = "*"
 
 [dependencies.vorbisfile]
-git = "https://github.com/tari/vorbisfile.rs"
+version = "*"
 optional = true
 
 [dependencies.ao]

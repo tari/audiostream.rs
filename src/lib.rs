@@ -1,5 +1,5 @@
 #![crate_name = "audiostream"]
-#![doc(html_root_url = "http://www.rust-ci.org/tari/audiostream.rs/doc/audiostream/")]
+#![doc(html_root_url = "http://rustdoc.taricorp.net/audiostream/audiostream/")]
 
 #![deny(dead_code,missing_docs)]
 

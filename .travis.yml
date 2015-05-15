@@ -1,8 +1,3 @@
 language: rust
-env:
-  global:
-    - secure: TVL/JNJPs7CbKNsqnPdRcBfNjXJaXpTXzhHw4zlLPZjyudJjpgRIhzI/toIm6ZRIFKkk0JHVvZBmdLNiMH6kVTWvLttzyKaGjI3gv59jz1QaM6Sf9Ju2tlV7Yv6LCaQVwwRwvj8B8K9Bv/24Sx/Nv794GXt8t3pLALENQk6bKFo=
+rust: nightly
 install: sudo apt-get install -qq libao-dev libvorbis-dev
-after_script:
-  - rustdoc -L target/deps/ src/lib.rs
-  - curl http://www.rust-ci.org/artifacts/put?t=$RUSTCI_TOKEN | sh
