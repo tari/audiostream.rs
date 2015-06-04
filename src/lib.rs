@@ -10,7 +10,6 @@
 #![feature(simd)]
 #![feature(slice_patterns)]
 #![feature(str_char)]
-#![feature(test)]
 #![plugin(quickcheck_macros)]
 
 //! Audio stream pipelines and processing.
@@ -59,6 +58,7 @@
 #[cfg(test)] extern crate test;
 #[cfg(test)] extern crate quickcheck;
 
+extern crate fftw3;
 extern crate num;
 extern crate rand;
 
@@ -72,14 +72,15 @@ use std::slice::mut_ref_slice;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 #[cfg(feature = "ao")] pub mod ao;
-#[cfg(feature = "vorbisfile")] pub mod vorbis;
+pub mod fft;
 pub mod synth;
+#[cfg(feature = "vorbisfile")] pub mod vorbis;
 
 mod interleave;
 #[cfg(target_arch = "x86_64")] mod cpu;
 
 /// Type bound for sample formats.
-pub trait Sample : Add<Self> + Mul<Self> + Div<Self>
+pub trait Sample : Add<Self> + Mul<Self> + Div<Self> + OverflowingOps
                  + NumCast + FromPrimitive + ::std::fmt::Debug
                  + Copy + Send {
 
@@ -94,6 +95,26 @@ pub trait Sample : Add<Self> + Mul<Self> + Div<Self>
     fn clips_hard() -> bool;
     /// Clip a value to be in range [min, max] (inclusive).
     fn clip(&self) -> Self;
+
+    /// Add two samples together, clipping if necessary (in hard-clipped formats).
+    fn mix(&self, other: &Self) -> Self {
+        if !self.clips_hard() {
+            return self + other;
+        }
+
+        let (overflowed, result) = self.overflowing_add(other);
+        if !overflowed {
+            result
+        } else {
+            // Overflow can only occur if both values have the same sign, so
+            // examining the sign of `self` only is correct.
+            if self.is_positive() {
+                self.max()
+            } else {
+                self.min()
+            }
+        }
+    }
 
     /// Get a floating-point representation of a sample.
     ///
@@ -522,6 +543,42 @@ impl<F: Sample, S: Source<Output=F>, P: Float + Sample> Source for Amplify<F, S,
         }
         SourceResult::Buffer(buf)
     }
+}
+
+pub struct Mix<A, B> {
+    sources: (A, B),
+}
+
+impl<A, B, F> Mix<A, B> where
+        A: MonoSource<Output=F>, B: MonoSource<Output=F> {
+    pub fn new(a: A, b: B) -> Mix<A, B> {
+        Mix {
+            sources: (a, b)
+        }
+    }
+}
+
+impl<A, B, F> MonoSource for Mix<A, B> where
+        A: MonoSource<Output=F>, B: MonoSource<Output=F>, F: Sample {
+    type Output = F;
+
+    fn next<'a>(&'a mut self) -> Option<&'a mut [F]> {
+        let a_buf = match self.sources.0.next() {
+            Some(b) => b,
+            x => return x
+        };
+        let b_buf = match self.sources.1.next() {
+            Some(b) => b,
+            x => return x
+        };
+
+        // TODO buffers must be the same length. Should either document that requirement
+        // or make it handle irregular buffers.
+        for i in 0..a_buf.len() {
+            a_buf[i] = a_buf[i].mix(b_buf[i]);
+        }
+
+        a_buf
 }
 
 #[cfg(test)]
